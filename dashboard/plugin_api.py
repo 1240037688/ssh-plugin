@@ -44,6 +44,23 @@ except ImportError:
         unified_diff,
     )
 
+try:
+    from audit_log import record as audit_record, tail as audit_tail
+except ImportError:
+    from ..audit_log import record as audit_record, tail as audit_tail  # type: ignore
+
+
+def _audit(op: str, server: dict[str, Any] | None, path: str | None, ok: bool = True, **detail: Any) -> None:
+    audit_record(
+        op,
+        server_id=(server or {}).get("id"),
+        server_name=(server or {}).get("name"),
+        path=path,
+        ok=ok,
+        source="rest",
+        detail=detail,
+    )
+
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "[::1]"})
 
 
@@ -193,6 +210,11 @@ async def conn_stats() -> dict[str, Any]:
     return sftp_client.pool_stats()
 
 
+@router.get("/audit")
+async def get_audit(limit: int = 50) -> dict[str, Any]:
+    return {"entries": audit_tail(min(max(limit, 1), 500))}
+
+
 @router.get("/servers")
 async def servers(mask: bool = False) -> dict[str, Any]:
     data = deployment_store.load()
@@ -301,6 +323,7 @@ async def fs_write(body: WriteIn) -> dict[str, Any]:
         if body.dryRun:
             return {"ok": True, "dryRun": True, "written": False, **meta}
         result = sftp_client.write_text(server, p, body.content)
+        _audit("write", server, p, addedLines=meta["addedLines"], removedLines=meta["removedLines"])
         return {
             "ok": True,
             "dryRun": False,
@@ -311,6 +334,7 @@ async def fs_write(body: WriteIn) -> dict[str, Any]:
             "identical": meta["identical"],
         }
     except Exception as exc:
+        _audit("write", server, body.path, ok=False, error=str(exc)[:200])
         raise _err(exc, 502) from exc
 
 
@@ -330,8 +354,11 @@ async def fs_mkdir(body: MkdirIn) -> dict[str, Any]:
     server = _server_or_404(body.id)
     p = _safe_path(server, body.path)
     try:
-        return sftp_client.mkdir(server, p)
+        result = sftp_client.mkdir(server, p)
+        _audit("mkdir", server, p)
+        return result
     except Exception as exc:
+        _audit("mkdir", server, p, ok=False, error=str(exc)[:200])
         raise _err(exc, 502) from exc
 
 
@@ -344,8 +371,11 @@ async def fs_rename(body: RenameIn) -> dict[str, Any]:
     src = _safe_path(server, raw_src)
     dst = _safe_path(server, raw_dst)
     try:
-        return sftp_client.rename(server, src, dst)
+        result = sftp_client.rename(server, src, dst)
+        _audit("rename", server, src, dst=dst)
+        return result
     except Exception as exc:
+        _audit("rename", server, src, ok=False, error=str(exc)[:200])
         raise _err(exc, 502) from exc
 
 
@@ -356,8 +386,11 @@ async def fs_delete(body: DeleteIn) -> dict[str, Any]:
     if p == "/":
         raise HTTPException(status_code=400, detail="refusing to delete root")
     try:
-        return sftp_client.delete(server, p, recursive=body.recursive)
+        result = sftp_client.delete(server, p, recursive=body.recursive)
+        _audit("delete", server, p, recursive=body.recursive)
+        return result
     except Exception as exc:
+        _audit("delete", server, p, ok=False, error=str(exc)[:200])
         raise _err(exc, 502) from exc
 
 
@@ -373,8 +406,11 @@ async def fs_upload(body: UploadIn) -> dict[str, Any]:
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"invalid base64: {exc}") from exc
     try:
-        return sftp_client.upload_bytes(server, p, raw)
+        result = sftp_client.upload_bytes(server, p, raw)
+        _audit("upload", server, p, bytes=result.get("bytes"))
+        return result
     except Exception as exc:
+        _audit("upload", server, p, ok=False, error=str(exc)[:200])
         raise _err(exc, 502) from exc
 
 
@@ -400,8 +436,12 @@ async def put_mappings(body: MappingsIn) -> dict[str, Any]:
 async def exec_cmd(body: ExecIn) -> dict[str, Any]:
     server = _server_or_404(body.id)
     try:
-        return sftp_client.exec_command(server, body.command, timeout=body.timeout)
+        result = sftp_client.exec_command(server, body.command, timeout=body.timeout)
+        _audit("exec", server, None, command=body.command[:200], exitCode=result.get("exitCode"))
+        return result
     except sftp_client.SftpError as exc:
+        _audit("exec", server, None, ok=False, command=body.command[:200], error=str(exc)[:200])
         raise _err(exc, 403 if "disabled" in str(exc) else 502) from exc
     except Exception as exc:
+        _audit("exec", server, None, ok=False, command=body.command[:200], error=str(exc)[:200])
         raise _err(exc, 502) from exc

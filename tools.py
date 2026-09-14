@@ -7,11 +7,13 @@ from typing import Any
 
 try:
     from . import deployment_store, sftp_client
+    from .audit_log import record as audit_record
     from .deploy_paths import agent_list_servers, map_local_to_remote, map_remote_to_local, unified_diff
     from .security import validate_local_path
 except ImportError:
     import deployment_store  # type: ignore
     import sftp_client  # type: ignore
+    from audit_log import record as audit_record  # type: ignore
     from deploy_paths import (  # type: ignore
         agent_list_servers,
         map_local_to_remote,
@@ -19,6 +21,18 @@ except ImportError:
         unified_diff,
     )
     from security import validate_local_path  # type: ignore
+
+
+def _audit(op: str, server: dict[str, Any] | None, path: str | None, ok: bool = True, **detail: Any) -> None:
+    audit_record(
+        op,
+        server_id=(server or {}).get("id"),
+        server_name=(server or {}).get("name"),
+        path=path,
+        ok=ok,
+        source="agent",
+        detail=detail,
+    )
 
 
 def _ok(payload: dict[str, Any]) -> str:
@@ -114,10 +128,12 @@ def ssh_write_file(args: dict, **kwargs) -> str:
         if dry_run:
             return _ok({"ok": True, "dryRun": True, "written": False, **meta})
         result = sftp_client.write_text(server, path, new_content)
+        _audit("write", server, path, addedLines=meta["addedLines"], removedLines=meta["removedLines"])
         return _ok({"ok": True, "dryRun": False, "written": True, **result, **{
             k: meta[k] for k in ("addedLines", "removedLines", "identical")
         }})
     except Exception as exc:
+        _audit("write", locals().get("server"), str(args.get("path") or ""), ok=False, error=str(exc)[:200])
         return _err(str(exc))
 
 
@@ -142,8 +158,11 @@ def ssh_mkdir(args: dict, **kwargs) -> str:
         path = deployment_store.safe_remote_path(
             str(args.get("path") or ""), server.get("allowedRemotePaths") or None
         )
-        return _ok(sftp_client.mkdir(server, path))
+        result = sftp_client.mkdir(server, path)
+        _audit("mkdir", server, path)
+        return _ok(result)
     except Exception as exc:
+        _audit("mkdir", None, str(args.get("path") or ""), ok=False, error=str(exc)[:200])
         return _err(str(exc))
 
 
@@ -156,8 +175,11 @@ def ssh_delete(args: dict, **kwargs) -> str:
         )
         if path == "/":
             return _err("refusing to delete root")
-        return _ok(sftp_client.delete(server, path, recursive=bool(args.get("recursive"))))
+        result = sftp_client.delete(server, path, recursive=bool(args.get("recursive")))
+        _audit("delete", server, path, recursive=bool(args.get("recursive")))
+        return _ok(result)
     except Exception as exc:
+        _audit("delete", None, str(args.get("path") or ""), ok=False, error=str(exc)[:200])
         return _err(str(exc))
 
 
@@ -180,8 +202,11 @@ def ssh_upload(args: dict, **kwargs) -> str:
         dry_run = bool(args.get("dryRun") or args.get("dry_run"))
         if dry_run:
             return _ok({"ok": True, "dryRun": True, "localPath": str(local), "remotePath": path, "bytes": local.stat().st_size})
-        return _ok(sftp_client.upload_bytes(server, path, local.read_bytes()))
+        result = sftp_client.upload_bytes(server, path, local.read_bytes())
+        _audit("upload", server, path, localPath=str(local), bytes=result.get("bytes"))
+        return _ok(result)
     except Exception as exc:
+        _audit("upload", None, str(args.get("remotePath") or ""), ok=False, error=str(exc)[:200])
         return _err(str(exc))
 
 
@@ -196,8 +221,10 @@ def ssh_download(args: dict, **kwargs) -> str:
         local.parent.mkdir(parents=True, exist_ok=True)
         data = sftp_client.download_bytes(server, path)
         local.write_bytes(data)
+        _audit("download", server, path, localPath=str(local), bytes=len(data))
         return _ok({"path": path, "localPath": str(local), "bytes": len(data)})
     except Exception as exc:
+        _audit("download", None, str(args.get("remotePath") or ""), ok=False, error=str(exc)[:200])
         return _err(str(exc))
 
 
@@ -207,6 +234,9 @@ def ssh_exec(args: dict, **kwargs) -> str:
         server = _resolve_server(str(args.get("server") or ""))
         command = str(args.get("command") or "").strip()
         timeout = int(args.get("timeout") or 30)
-        return _ok(sftp_client.exec_command(server, command, timeout=timeout))
+        result = sftp_client.exec_command(server, command, timeout=timeout)
+        _audit("exec", server, None, command=command[:200], exitCode=result.get("exitCode"))
+        return _ok(result)
     except Exception as exc:
+        _audit("exec", None, None, ok=False, command=str(args.get("command") or "")[:200], error=str(exc)[:200])
         return _err(str(exc))
