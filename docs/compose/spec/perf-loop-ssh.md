@@ -1,14 +1,23 @@
 ---
 feature: perf-loop-ssh
-status: designed
+status: delivered
 updated: 2026-09-14
 branch: feature/ssh-deploy
-commits: pending
+commits: 2e6fa6a
 ---
 
 # perf-loop-ssh：为外部性能插件提供稳定 SSH 与文件通道
 
 ## Report
+
+**What was built** — 在既有 `ssh-plugin` 上增加进程内 SSH 连接池（keep-alive、失效探测、一次自动重连）、`ssh_health` 工具与 `/health/server`、`/conn/stats`；Skill `perf-loop` + Spec 内嵌 P0–P6/P-Fail 提示词计划表。本插件只做连接与文件通道，指标/出图由外部 Hermes 插件负责。
+
+**Verification** — `py_compile` PASS；池复用/重试单测 PASS（mock）；`node --check` PASS。未对真实服务器联调。
+
+**Journey log**
+- 范围收窄：KPI/指标图不在本插件。
+- 改参由外部插件驱动；本插件提供先读后写工具。
+- 仍需 `plugins.enabled` 启用 + paramiko，否则 404。
 
 ## [S1] Problem
 
@@ -109,7 +118,7 @@ P0 → P1 → [P2 → P3 → P4 →（性能插件判定）→ P5 → P3…] →
 
 ## Tasks
 
-- [ ] T1: 实现连接池 `ssh_session.py` + keep-alive/重试 — acceptance: 同 server 连续两次 ls 不新建逻辑连接（stats 可见 reuse） (covers: S2)
-- [ ] T2: 接入 sftp_client/plugin_api 使用池；新增 `/health/server`、`ssh_health` — acceptance: 工具/路由存在且断连可自动恢复一次 (covers: S2; depends: T1)
-- [ ] T3: Skill `skills/perf-loop/SKILL.md` + Spec 同步提示词计划表 — acceptance: 表格与硬约束完整 (covers: S2)
-- [ ] T4: 静态校验与单测（池复用、重连、health） — acceptance: py_compile + 单测 PASS (covers: S2; depends: T2)
+- [x] T1: 实现连接池 `ssh_session.py` + keep-alive/重试 — acceptance: 同 server 连续两次 ls 不新建逻辑连接（stats 可见 reuse） (covers: S2)
+- [x] T2: 接入 sftp_client/plugin_api 使用池；新增 `/health/server`、`ssh_health` — acceptance: 工具/路由存在且断连可自动恢复一次 (covers: S2; depends: T1)
+- [x] T3: Skill `skills/perf-loop/SKILL.md` + Spec 同步提示词计划表 — acceptance: 表格与硬约束完整 (covers: S2)
+- [x] T4: 静态校验与单测（池复用、重连、health） — acceptance: py_compile + 单测 PASS (covers: S2; depends: T2)
