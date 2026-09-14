@@ -368,23 +368,31 @@ async function ensureTreeForSelected(selected) {
     return
   }
   if (treeLoadedFor === selected) return
+  // Claim before await so the sibling DeployPage mount cannot double-fetch.
   treeLoadedFor = selected
-  await resetTreeForServer()
+  try {
+    await resetTreeForServer()
+  } catch (e) {
+    if (treeLoadedFor === selected) treeLoadedFor = null
+    throw e
+  }
 }
 
 async function loadTreeDir(path) {
   const id = $selectedId.get()
-  if (!id) return
+  if (!id) return false
   const epoch = treeEpoch
   $treeLoading.set({ ...$treeLoading.get(), [path]: true })
   try {
     const r = await ctxRest(
       '/fs/ls?id=' + encodeURIComponent(id) + '&path=' + encodeURIComponent(path)
     )
-    if (epoch !== treeEpoch) return
+    if (epoch !== treeEpoch) return false
     $treeNodes.set({ ...$treeNodes.get(), [path]: r?.entries || [] })
+    return true
   } catch (e) {
     if (epoch === treeEpoch) notify('error', String(e?.message || e))
+    return false
   } finally {
     if (epoch === treeEpoch) {
       const l = { ...$treeLoading.get() }
@@ -407,14 +415,18 @@ async function toggleDir(path) {
 }
 
 async function resetTreeForServer() {
-  treeLoadedFor = $selectedId.get()
+  const selected = $selectedId.get()
+  treeLoadedFor = selected
   treeEpoch += 1
   $expanded.set({ '/': true })
   $treeNodes.set({})
   $treeLoading.set({})
   $openFile.set(null)
   $editorDirty.set(false)
-  await loadTreeDir('/')
+  const ok = await loadTreeDir('/')
+  // Allow remount/pane to retry after a failed load.
+  if (!ok && treeLoadedFor === selected) treeLoadedFor = null
+  return ok
 }
 
 async function refreshTreePath(path) {

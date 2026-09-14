@@ -61,6 +61,57 @@ class TestResultTools(unittest.TestCase):
             self.assertEqual(done["downloaded"], 1)
             self.assertEqual((target / "result.log").read_bytes(), b"hello\nworld\n")
 
+    def test_download_tree_entry_limit(self):
+        class WideSftp(FakeSftp):
+            def listdir_attr(self, path):
+                if path == "/allowed":
+                    return [
+                        SimpleNamespace(filename=f"f{i}.txt", st_mode=stat.S_IFREG, st_size=1)
+                        for i in range(5)
+                    ]
+                return []
+
+        class WideSession(FakeSession):
+            def __init__(self, *_args):
+                self.sftp = WideSftp()
+
+        with tempfile.TemporaryDirectory(dir=ROOT) as tmp:
+            server = {"allowedRemotePaths": ["/allowed"], "allowedLocalPaths": [tmp]}
+            with patch.object(sftp_client, "RemoteSession", WideSession):
+                with self.assertRaises(ValueError):
+                    download_plan.download_tree(
+                        server, "/allowed", str(Path(tmp) / "out"), max_entries=3
+                    )
+
+    def test_download_tree_reguards_at_open(self):
+        """Open must re-check allowlist even if plan-time list succeeded."""
+        class SwapSftp(FakeSftp):
+            def __init__(self):
+                super().__init__()
+                self.opened = []
+
+            def open(self, path, mode):
+                self.opened.append(path)
+                raise ValueError("guard should have rejected this path")
+
+            def normalize(self, path):
+                # After list, resolve to outside allowlist (symlink swap).
+                if path.endswith("result.log"):
+                    return "/etc/passwd"
+                return path
+
+        class SwapSession(FakeSession):
+            def __init__(self, *_args):
+                self.sftp = SwapSftp()
+
+        with tempfile.TemporaryDirectory(dir=ROOT) as tmp:
+            server = {"allowedRemotePaths": ["/allowed"], "allowedLocalPaths": [tmp]}
+            with patch.object(sftp_client, "RemoteSession", SwapSession):
+                with self.assertRaises(ValueError):
+                    download_plan.download_tree(
+                        server, "/allowed", str(Path(tmp) / "out"), dry_run=False
+                    )
+
     def test_glob_and_tail(self):
         server = {"allowedRemotePaths": ["/allowed"]}
         with patch.object(sftp_client, "RemoteSession", FakeSession):
