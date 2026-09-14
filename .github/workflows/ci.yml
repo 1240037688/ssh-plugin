@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, feature/**]
+    branches: [main, feature/**, codex/**]
   pull_request:
 
 jobs:
@@ -19,12 +19,15 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      - name: Install test dependencies
+        run: python -m pip install "fastapi>=0.100" "pydantic>=2" "paramiko>=3"
+
       - name: Unit tests
         run: python -m unittest discover -s tests -v
 
       - name: Byte-compile
         run: |
-          python -m py_compile deploy_paths.py security.py secret_store.py ssh_session.py sftp_client.py tools.py schemas.py __init__.py dashboard/plugin_api.py
+          python -m py_compile deploy_paths.py download_plan.py security.py secret_store.py ssh_session.py sftp_client.py sync_plan.py tools.py schemas.py __init__.py dashboard/plugin_api.py
 
       - name: Setup Node
         uses: actions/setup-node@v4
