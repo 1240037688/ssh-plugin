@@ -102,8 +102,50 @@ def ssh_read_file(args: dict, **kwargs) -> str:
         path = deployment_store.safe_remote_path(
             str(args.get("path") or ""), server.get("allowedRemotePaths") or None
         )
+        if args.get("offset") is not None or args.get("limit") is not None:
+            return _ok(
+                sftp_client.read_text_chunk(
+                    server,
+                    path,
+                    offset=int(args.get("offset") or 0),
+                    limit=int(args.get("limit") or sftp_client.CHUNK_DEFAULT),
+                )
+            )
         return _ok(sftp_client.read_text(server, path))
     except Exception as exc:
+        return _err(str(exc))
+
+
+def ssh_sync(args: dict, **kwargs) -> str:
+    del kwargs
+    try:
+        from .sync_plan import plan_sync
+    except ImportError:
+        from sync_plan import plan_sync  # type: ignore
+    try:
+        server = _resolve_server(str(args.get("server") or ""))
+        local_root = str(args.get("localRoot") or "")
+        if not local_root:
+            # first mapping localRoot
+            maps = server.get("mappings") or []
+            if not maps:
+                return _err("no mappings configured for this server")
+            local_root = maps[0].get("localRoot") or ""
+        dry_run = True if args.get("dryRun") is None else bool(args.get("dryRun"))
+        result = plan_sync(server, local_root, dry_run=dry_run, max_files=int(args.get("maxFiles") or 500))
+        if result.get("ok"):
+            _audit(
+                "sync",
+                server,
+                None,
+                dryRun=dry_run,
+                count=result.get("count"),
+                uploaded=result.get("uploaded"),
+                localRoot=result.get("localRoot"),
+            )
+        return _ok(result)
+    except Exception as exc:
+        _audit("sync", None, None, ok=False, error=str(exc)[:200])
         return _err(str(exc))
 
 

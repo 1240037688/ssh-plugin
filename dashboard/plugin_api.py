@@ -215,6 +215,40 @@ async def get_audit(limit: int = 50) -> dict[str, Any]:
     return {"entries": audit_tail(min(max(limit, 1), 500))}
 
 
+class SyncIn(BaseModel):
+    id: str
+    localRoot: str | None = None
+    dryRun: bool = True
+    maxFiles: int = 500
+
+
+@router.post("/fs/sync")
+async def fs_sync(body: SyncIn) -> dict[str, Any]:
+    server = _server_or_404(body.id)
+    try:
+        from sync_plan import plan_sync
+    except ImportError:
+        from ..sync_plan import plan_sync  # type: ignore
+    local_root = body.localRoot or ((server.get("mappings") or [{}])[0].get("localRoot") or "")
+    if not local_root:
+        raise HTTPException(status_code=400, detail="localRoot required (or configure mappings)")
+    try:
+        result = plan_sync(server, local_root, dry_run=body.dryRun, max_files=body.maxFiles)
+        if result.get("ok"):
+            _audit(
+                "sync",
+                server,
+                None,
+                dryRun=body.dryRun,
+                count=result.get("count"),
+                uploaded=result.get("uploaded"),
+            )
+        return result
+    except Exception as exc:
+        _audit("sync", server, None, ok=False, error=str(exc)[:200])
+        raise _err(exc, 502) from exc
+
+
 @router.get("/servers")
 async def servers(mask: bool = False) -> dict[str, Any]:
     data = deployment_store.load()
@@ -273,10 +307,19 @@ async def fs_ls(id: str, path: str = "/") -> dict[str, Any]:
 
 
 @router.get("/fs/read")
-async def fs_read(id: str, path: str) -> dict[str, Any]:
+async def fs_read(
+    id: str,
+    path: str,
+    offset: int | None = None,
+    limit: int | None = None,
+) -> dict[str, Any]:
     server = _server_or_404(id)
     p = _safe_path(server, path)
     try:
+        if offset is not None or limit is not None:
+            return sftp_client.read_text_chunk(
+                server, p, offset=offset or 0, limit=limit or sftp_client.CHUNK_DEFAULT
+            )
         return sftp_client.read_text(server, p)
     except Exception as exc:
         raise _err(exc, 502) from exc

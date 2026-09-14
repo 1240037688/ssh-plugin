@@ -217,6 +217,42 @@ def read_text(server: dict[str, Any], path: str, max_bytes: int = MAX_READ_BYTES
         return {"path": path, "content": text, "truncated": truncated, "bytes": len(data)}
 
 
+CHUNK_DEFAULT = 256 * 1024
+CHUNK_MAX = 1_000_000
+
+
+def read_text_chunk(
+    server: dict[str, Any],
+    path: str,
+    offset: int = 0,
+    limit: int = CHUNK_DEFAULT,
+) -> dict[str, Any]:
+    """Read a UTF-8 byte window [offset, offset+limit) from a remote file."""
+    offset = max(0, int(offset or 0))
+    limit = min(max(1, int(limit or CHUNK_DEFAULT)), CHUNK_MAX)
+    with RemoteSession(session_server(server)) as sess:
+        with sess.sftp.open(path, "rb") as f:
+            try:
+                size = f.stat().st_size
+            except Exception:
+                size = None
+            if offset:
+                f.seek(offset)
+            raw = f.read(limit)
+    text = raw.decode("utf-8", errors="replace")
+    end = offset + len(raw)
+    return {
+        "path": path,
+        "content": text,
+        "offset": offset,
+        "bytes": len(raw),
+        "nextOffset": end if raw else None,
+        "eof": size is not None and end >= size,
+        "fileSize": size,
+        "limit": limit,
+    }
+
+
 def write_text(server: dict[str, Any], path: str, content: str) -> dict[str, Any]:
     raw = content.encode("utf-8")
     if len(raw) > MAX_UPLOAD_BYTES:

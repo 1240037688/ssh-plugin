@@ -33,12 +33,17 @@ SSH_LS = {
 
 SSH_READ_FILE = {
     "name": "ssh_read_file",
-    "description": "Read a remote text file over SFTP (UTF-8, size-capped).",
+    "description": (
+        "Read a remote text file over SFTP (UTF-8). "
+        "Pass offset/limit (bytes) to read large files in chunks; omit for a single capped read."
+    ),
     "parameters": {
         "type": "object",
         "properties": {
             "server": {"type": "string"},
             "path": {"type": "string"},
+            "offset": {"type": "integer", "description": "Byte offset, default 0"},
+            "limit": {"type": "integer", "description": "Max bytes this call (default 256KB, max 1MB)"},
         },
         "required": ["server", "path"],
     },
@@ -173,6 +178,24 @@ SSH_HEALTH = {
     },
 }
 
+SSH_SYNC = {
+    "name": "ssh_sync",
+    "description": (
+        "Batch-upload a local directory to remote using server mappings (PyCharm-style). "
+        "Default dryRun=true returns the planned file list; set dryRun=false to upload."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "server": {"type": "string"},
+            "localRoot": {"type": "string", "description": "Optional; defaults to first mapping localRoot"},
+            "dryRun": {"type": "boolean", "description": "Default true — plan only"},
+            "maxFiles": {"type": "integer", "description": "Safety cap, default 500"},
+        },
+        "required": ["server"],
+    },
+}
+
 ALL_SCHEMAS = [
     SSH_LIST_SERVERS,
     SSH_HEALTH,
@@ -184,5 +207,6 @@ ALL_SCHEMAS = [
     SSH_DELETE,
     SSH_UPLOAD,
     SSH_DOWNLOAD,
+    SSH_SYNC,
     SSH_EXEC,
 ]

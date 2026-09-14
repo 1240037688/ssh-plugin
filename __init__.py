@@ -23,6 +23,7 @@ def register(ctx) -> None:
         (schemas.SSH_DELETE, tools.ssh_delete),
         (schemas.SSH_UPLOAD, tools.ssh_upload),
         (schemas.SSH_DOWNLOAD, tools.ssh_download),
+        (schemas.SSH_SYNC, tools.ssh_sync),
         (schemas.SSH_EXEC, tools.ssh_exec),
     ]
     for schema, handler in pairs:
