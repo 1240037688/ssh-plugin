@@ -68,8 +68,18 @@ class MkdirIn(BaseModel):
 
 class RenameIn(BaseModel):
     id: str
-    src: str
-    dst: str
+    src: str | None = None
+    dst: str | None = None
+    # Aliases accepted for spec/compat
+    from_path: str | None = Field(default=None, alias="from")
+    to_path: str | None = Field(default=None, alias="to")
+
+    model_config = {"populate_by_name": True}
+
+    def resolved(self) -> tuple[str, str]:
+        src = self.src or self.from_path or ""
+        dst = self.dst or self.to_path or ""
+        return src, dst
 
 
 class DeleteIn(BaseModel):
@@ -80,9 +90,13 @@ class DeleteIn(BaseModel):
 
 class UploadIn(BaseModel):
     id: str
-    path: str
+    path: str | None = None
+    remotePath: str | None = None
     contentBase64: str
     filename: str | None = None
+
+    def resolved_path(self) -> str:
+        return self.path or self.remotePath or ""
 
 
 class MappingsIn(BaseModel):
@@ -209,8 +223,11 @@ async def fs_mkdir(body: MkdirIn) -> dict[str, Any]:
 @router.post("/fs/rename")
 async def fs_rename(body: RenameIn) -> dict[str, Any]:
     server = _server_or_404(body.id)
-    src = _safe_path(server, body.src)
-    dst = _safe_path(server, body.dst)
+    raw_src, raw_dst = body.resolved()
+    if not raw_src or not raw_dst:
+        raise HTTPException(status_code=400, detail="rename requires src/dst or from/to")
+    src = _safe_path(server, raw_src)
+    dst = _safe_path(server, raw_dst)
     try:
         return sftp_client.rename(server, src, dst)
     except Exception as exc:
@@ -232,7 +249,10 @@ async def fs_delete(body: DeleteIn) -> dict[str, Any]:
 @router.post("/fs/upload")
 async def fs_upload(body: UploadIn) -> dict[str, Any]:
     server = _server_or_404(body.id)
-    p = _safe_path(server, body.path)
+    remote = body.resolved_path()
+    if not remote:
+        raise HTTPException(status_code=400, detail="upload requires path or remotePath")
+    p = _safe_path(server, remote)
     try:
         raw = base64.b64decode(body.contentBase64 or "")
     except Exception as exc:

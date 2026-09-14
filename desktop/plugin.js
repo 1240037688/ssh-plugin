@@ -11,7 +11,6 @@ import {
   atom,
   host,
   useValue,
-  usePluginI18n,
   Button,
   Input,
   Textarea,
@@ -35,7 +34,7 @@ import {
   STATUSBAR_AREAS
 } from '@hermes/plugin-sdk'
 import { jsx, jsxs } from 'react/jsx-runtime'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 
 const ID = 'ssh-plugin'
 const ROUTE = '/ssh-deploy'
@@ -643,19 +642,23 @@ function FileTree({ t }) {
                                 void (async () => {
                                   const id = $selectedId.get()
                                   if (!id) return
+                                  const nextName = window.prompt(t('fileName'), e.name)
+                                  if (!nextName || nextName === e.name) return
+                                  const next = joinPath(parentOf(e.path), nextName.trim())
                                   try {
                                     await ctxRest('/fs/rename', {
                                       method: 'POST',
-                                      body: { id, src: e.path, dst: joinPath(parentOf(e.path), e.name + '.bak') }
+                                      body: { id, src: e.path, dst: next, from: e.path, to: next }
                                     })
                                     notify('success', t('renamed'))
+                                    if ($openFile.get()?.path === e.path) $openFile.set(null)
                                     await loadList()
                                   } catch (err2) {
                                     notify('error', String(err2?.message || err2))
                                   }
                                 })()
                               },
-                              children: '…'
+                              children: '✎'
                             }),
                             jsx(Button, {
                               size: 'sm',
@@ -1275,7 +1278,7 @@ export default {
       {
         id: 'nav',
         area: SIDEBAR_NAV_AREA,
-        data: { path: ROUTE, label: t('nav'), codicon: 'remote-explorer' }
+        data: { path: ROUTE, label: t('nav'), codicon: 'remote' }
       },
       {
         id: 'open',

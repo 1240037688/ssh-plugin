@@ -1,14 +1,24 @@
 ---
 feature: ssh-deploy
-status: designed
+status: delivered
 updated: 2026-09-14
 branch: feature/ssh-deploy
-commits: pending
+commits: 8a07fb9..HEAD
 ---
 
 # SSH Deploy（可视化 SSH 部署与文件管理）
 
 ## Report
+
+**What was built** — Hermes 统一包 `ssh-plugin`：对标 PyCharm Deployment 的可视化 SSH/SFTP 管理。Desktop 半边提供路由 `/ssh-deploy` 三栏 UI（服务器 / 远程文件树 / 编辑与图片预览），并含 Connection + Mappings/Exclusions 配置；Python 半边经 `paramiko` 暴露 `/api/plugins/ssh-plugin/*` 与 9 个 Agent 工具（`ssh_*`）。另附 `preview/index.html` 离线 mock 便于浏览器验收。
+
+**Verification** — `node --check desktop/plugin.js` PASS；`node --check preview/app.js` PASS；`MIMO_PYTHON -m py_compile` 全部 py PASS；路径安全 / 排除 glob / 密码保留单测 PASS。未在本机 Hermes 内做真实 SSH 联调（无目标机）。
+
+**Journey log**
+- 统一包桌面半边默认 opt-in，安装后需在 Capabilities 打开。
+- 密码字段 UI 传空表示「保留原密」；仅非空覆盖。
+- `dir/**` 排除同时隐藏目录本身。
+- rename API 接受 `src/dst` 与 `from/to` 双别名。
 
 ## [S1] Problem
 
@@ -86,9 +96,9 @@ ssh-plugin/                    # 插件 id = ssh-plugin
 | GET | `/fs/preview?id=&path=` | 图片预览（限大小） |
 | POST | `/fs/write` | `{id, path, content}` 创建/覆盖 |
 | POST | `/fs/mkdir` | `{id, path}` |
-| POST | `/fs/rename` | `{id, from, to}` |
+| POST | `/fs/rename` | `{id, src, dst}`（兼容别名 `from`/`to`） |
 | POST | `/fs/delete` | `{id, path, recursive?}` |
-| POST | `/fs/upload` | `{id, remotePath, filename, contentBase64}` |
+| POST | `/fs/upload` | `{id, path\|remotePath, contentBase64}` |
 | GET | `/mappings?id=` | 映射列表 |
 | PUT | `/mappings` | 整表替换该服务器 mappings+exclusions |
 
@@ -159,9 +169,9 @@ Handler 签名 `def f(args: dict, **kwargs) -> str`，始终返回 JSON 字符�
 
 ## Tasks
 
-- [ ] T1: 脚手架 + plugin.yaml + deployment_store + sftp_client — acceptance: 模块可 import，配置读写往返正确 (covers: S2)
-- [ ] T2: plugin_api.py 全部 REST 路由 — acceptance: 路由齐全，错误为 JSON，无 secret 泄漏 (covers: S2; depends: T1)
-- [ ] T3: Agent 工具 schemas + tools + register — acceptance: 工具名与 handler 一一对应，返回 JSON 字符串 (covers: S2; depends: T1)
-- [ ] T4: desktop/plugin.js 可视化三栏 UI — acceptance: 无 JSX、仅允许 import、theme vars、调用 ctx.rest (covers: S2; depends: T2)
-- [ ] T5: preview/index.html 交互预览 — acceptance: 浏览器打开可走通 mock 流程 (covers: S2)
-- [ ] T6: SKILL.md + README + 静态校验 — acceptance: node --check 与 py_compile 通过 (covers: S2)
+- [x] T1: 脚手架 + plugin.yaml + deployment_store + sftp_client — acceptance: 模块可 import，配置读写往返正确 (covers: S2)
+- [x] T2: plugin_api.py 全部 REST 路由 — acceptance: 路由齐全，错误为 JSON，无 secret 泄漏 (covers: S2; depends: T1)
+- [x] T3: Agent 工具 schemas + tools + register — acceptance: 工具名与 handler 一一对应，返回 JSON 字符串 (covers: S2; depends: T1)
+- [x] T4: desktop/plugin.js 可视化三栏 UI — acceptance: 无 JSX、仅允许 import、theme vars、调用 ctx.rest (covers: S2; depends: T2)
+- [x] T5: preview/index.html 交互预览 — acceptance: 浏览器打开可走通 mock 流程 (covers: S2)
+- [x] T6: SKILL.md + README + 静态校验 — acceptance: node --check 与 py_compile 通过 (covers: S2)

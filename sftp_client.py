@@ -47,7 +47,19 @@ def _connect(server: dict[str, Any]):
     timeout = float(server.get("timeout") or 20)
 
     client = pk.SSHClient()
-    client.set_missing_host_key_policy(pk.AutoAddPolicy())
+    # Prefer strict verification against ~/.ssh/known_hosts; fall back to
+    # auto-accept only when no known_hosts file exists (first-run UX).
+    from pathlib import Path as _P
+
+    known = _P.home() / ".ssh" / "known_hosts"
+    if known.is_file():
+        try:
+            client.load_host_keys(str(known))
+            client.set_missing_host_key_policy(pk.RejectPolicy())
+        except Exception:
+            client.set_missing_host_key_policy(pk.AutoAddPolicy())
+    else:
+        client.set_missing_host_key_policy(pk.AutoAddPolicy())
     connect_kwargs: dict[str, Any] = {
         "hostname": host,
         "port": port,

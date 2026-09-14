@@ -124,10 +124,11 @@ def upsert_server(payload: dict[str, Any]) -> dict[str, Any]:
                 existing, idx = s, i
                 break
         if existing is not None:
-            # Keep previous secret if UI sent masked placeholder
+            # Empty / omitted / masked secrets mean "keep previous value".
+            # Only a non-empty non-placeholder overwrites.
             for secret in ("password", "passphrase", "privateKey"):
-                if incoming.get(secret) == "***" and existing.get(secret):
-                    incoming[secret] = existing[secret]
+                if incoming.get(secret) in (None, "", "***"):
+                    incoming[secret] = existing.get(secret)
             data["servers"][idx] = incoming
         else:
             data["servers"].append(incoming)
@@ -207,6 +208,11 @@ def match_exclusion(rel_path: str, patterns: list[str]) -> bool:
             continue
         if _glob_match(rel, pat) or _glob_match(rel, pat.rstrip("/")):
             return True
+        # dir/** should also hide the directory entry itself
+        if pat.endswith("/**"):
+            base = pat[:-3].rstrip("/")
+            if base and (rel == base or rel.startswith(base + "/")):
+                return True
         # basename match for patterns like *.pyc
         if "/" not in pat.rstrip("/") and _glob_match(rel.split("/")[-1], pat):
             return True
