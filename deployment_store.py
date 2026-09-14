@@ -72,6 +72,17 @@ def _normalize_server(raw: dict[str, Any]) -> dict[str, Any]:
     return server
 
 
+def _raw_needs_migration(raw_servers: list) -> bool:
+    for s in raw_servers or []:
+        if not isinstance(s, dict):
+            continue
+        for key in ("password", "passphrase", "privateKeyContent"):
+            val = s.get(key)
+            if isinstance(val, str) and val and not val.startswith("enc:dpapi:v1:"):
+                return True
+    return False
+
+
 def load() -> dict[str, Any]:
     with _LOCK:
         path = _store_path()
@@ -83,18 +94,23 @@ def load() -> dict[str, Any]:
             return _empty()
         if not isinstance(data, dict):
             return _empty()
+        raw_list = [s for s in data.get("servers") or [] if isinstance(s, dict)]
+        migrate = _raw_needs_migration(raw_list)
         servers = []
-        for s in data.get("servers") or []:
-            if not isinstance(s, dict):
-                continue
+        for s in raw_list:
             norm = _normalize_server(s)
             try:
                 norm = decrypt_server_secrets(norm)
             except RuntimeError:
-                # Keep encoded value; connect will fail with a clear error
                 pass
             servers.append(norm)
-        return {"servers": servers, "defaultServerId": data.get("defaultServerId")}
+        result = {"servers": servers, "defaultServerId": data.get("defaultServerId")}
+    if migrate:
+        try:
+            save(result)
+        except OSError:
+            pass
+    return result
 
 
 def save(data: dict[str, Any]) -> None:
