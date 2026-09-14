@@ -8,19 +8,17 @@ from typing import Any
 try:
     from .deploy_paths import map_local_to_remote
     from .security import validate_local_path
+    from .deployment_store import match_exclusion, safe_remote_path
 except ImportError:
     from deploy_paths import map_local_to_remote  # type: ignore
     from security import validate_local_path  # type: ignore
+    from deployment_store import match_exclusion, safe_remote_path  # type: ignore
 
 # Skip common junk by default when no exclusions configured
 _DEFAULT_SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", ".hg", ".svn"}
 
 
 def _is_excluded(rel: str, patterns: list[str]) -> bool:
-    try:
-        from .deployment_store import match_exclusion
-    except ImportError:
-        from deployment_store import match_exclusion  # type: ignore
     return match_exclusion(rel, patterns or [])
 
 
@@ -30,12 +28,22 @@ def plan_sync(
     *,
     dry_run: bool = True,
     max_files: int = 500,
+    expected_files: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Walk local_root and plan uploads via mappings. Never writes unless dry_run=False."""
     root = validate_local_path(local_root, server)
+    max_files = max(1, int(max_files))
     if not root.is_dir():
         return {"ok": False, "error": f"local root is not a directory: {root}"}
     exclusions = server.get("exclusions") or []
+    mapping_server = {
+        **server,
+        "mappings": [
+            {**m, "localRoot": str(Path(m["localRoot"]).expanduser().resolve())}
+            for m in server.get("mappings") or []
+            if m.get("localRoot")
+        ],
+    }
     planned: list[dict[str, Any]] = []
     skipped = 0
     errors: list[str] = []
@@ -43,30 +51,30 @@ def plan_sync(
     import os
 
     for dirpath, dirnames, filenames in os.walk(str(root)):
+        current = Path(dirpath)
         dirnames[:] = [
             d
             for d in dirnames
-            if d not in _DEFAULT_SKIP_DIRS and not _is_excluded(d, exclusions)
+            if d not in _DEFAULT_SKIP_DIRS
+            and not _is_excluded((current / d).relative_to(root).as_posix(), exclusions)
         ]
         for name in filenames:
-            if _is_excluded(name, exclusions):
+            local = current / name
+            rel = local.relative_to(root).as_posix()
+            if _is_excluded(rel, exclusions):
                 skipped += 1
                 continue
-            local = Path(dirpath) / name
-            mapped = map_local_to_remote(server, str(local))
+            validate_local_path(local, server)
+            mapped = map_local_to_remote(mapping_server, str(local))
             if not mapped.get("ok"):
                 skipped += 1
                 continue
-            try:
-                rel = str(local.relative_to(root))
-            except ValueError:
-                rel = name
             planned.append(
                 {
                     "localPath": str(local),
-                    "remotePath": mapped["remotePath"],
+                    "remotePath": safe_remote_path(mapped["remotePath"], server.get("allowedRemotePaths") or None),
                     "size": local.stat().st_size,
-                    "rel": rel.replace("\\", "/"),
+                    "rel": rel,
                 }
             )
             if len(planned) >= max_files:
@@ -76,6 +84,12 @@ def plan_sync(
 
     uploaded: list[dict[str, Any]] = []
     if not dry_run:
+        if expected_files is not None:
+            identity = lambda items: [
+                (item.get("localPath"), item.get("remotePath"), item.get("size")) for item in items
+            ]
+            if identity(planned) != identity(expected_files):
+                raise ValueError("sync plan changed since preview; preview again")
         try:
             from . import sftp_client
         except ImportError:

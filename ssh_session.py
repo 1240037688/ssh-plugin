@@ -168,21 +168,25 @@ def get_session(server: dict[str, Any], *, force_new: bool = False):
     class _Ctx:
         def __enter__(self):
             entry.lock.acquire()
-            if force_new:
-                _close_quiet(entry)
-            if entry.sftp is None or entry.client is None or not _alive(entry.client.get_transport()):
-                _close_quiet(entry)
-                client, sftp, ms = _open(server)
-                entry.client, entry.sftp, entry.connect_ms = client, sftp, ms
             try:
-                # cheap probe — catches half-open sockets
-                entry.sftp.listdir(".")
+                if force_new:
+                    _close_quiet(entry)
+                if entry.sftp is None or entry.client is None or not _alive(entry.client.get_transport()):
+                    _close_quiet(entry)
+                    client, sftp, ms = _open(server)
+                    entry.client, entry.sftp, entry.connect_ms = client, sftp, ms
+                try:
+                    # cheap probe — catches half-open sockets
+                    entry.sftp.listdir(".")
+                except Exception:
+                    _close_quiet(entry)
+                    client, sftp, ms = _open(server)
+                    entry.client, entry.sftp, entry.connect_ms = client, sftp, ms
+                entry.last_ok = time.time()
+                return entry.sftp, entry.client
             except Exception:
-                _close_quiet(entry)
-                client, sftp, ms = _open(server)
-                entry.client, entry.sftp, entry.connect_ms = client, sftp, ms
-            entry.last_ok = time.time()
-            return entry.sftp, entry.client
+                entry.lock.release()
+                raise
 
         def __exit__(self, *args):
             entry.lock.release()

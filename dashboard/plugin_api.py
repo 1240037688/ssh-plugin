@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import errno
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -235,6 +236,30 @@ class SyncIn(BaseModel):
     localRoot: str | None = None
     dryRun: bool = True
     maxFiles: int = 500
+    expectedFiles: list[dict[str, Any]] | None = None
+
+
+class DownloadTreeIn(BaseModel):
+    id: str
+    remoteRoot: str
+    localRoot: str
+    dryRun: bool = True
+    maxFiles: int = 500
+
+
+@router.post("/fs/download-tree")
+async def fs_download_tree(body: DownloadTreeIn) -> dict[str, Any]:
+    server = _server_or_404(body.id)
+    try:
+        from download_plan import download_tree
+        result = await _ssh_call(
+            download_tree, server, body.remoteRoot, body.localRoot,
+            dry_run=body.dryRun, max_files=body.maxFiles,
+        )
+        _audit("download_tree", server, result["remoteRoot"], dryRun=body.dryRun, count=result["count"])
+        return result
+    except Exception as exc:
+        raise _err(exc, 502) from exc
 
 
 @router.post("/fs/sync")
@@ -249,7 +274,8 @@ async def fs_sync(body: SyncIn) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="localRoot required (or configure mappings)")
     try:
         result = await _ssh_call(
-            plan_sync, server, local_root, dry_run=body.dryRun, max_files=body.maxFiles
+            plan_sync, server, local_root, dry_run=body.dryRun, max_files=body.maxFiles,
+            expected_files=body.expectedFiles,
         )
         if result.get("ok"):
             _audit(
@@ -381,8 +407,9 @@ async def fs_write(body: WriteIn) -> dict[str, Any]:
         old = ""
         try:
             old = (await _ssh_call(sftp_client.read_text, server, p))["content"]
-        except Exception:
-            old = ""
+        except OSError as exc:
+            if exc.errno != errno.ENOENT:
+                raise
         meta = unified_diff(old, body.content, p)
         if body.dryRun:
             return {"ok": True, "dryRun": True, "written": False, **meta}

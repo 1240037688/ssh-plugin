@@ -10,7 +10,7 @@ commits: A1-A2-B1
 
 ## Report
 
-**Partial delivery** — 已实现 A1 别名掩码（Agent 默认 `host/username=***`）、A2 写前 Dry-Run Diff（工具 + Desktop 确认框）、B1 `ssh_map_path` / `/fs/map` 与 upload 可自动映射。A3/A4、B2/B3、C 系待后续。
+**Current implementation** — A1–A4、B1–B3、C1–C2 已落地。B3 提供 `ssh_download_tree` 与 `/fs/download-tree`，默认 dry-run、限制文件数/总量并跳过远端符号链接；C2 提供 `ssh_glob` 与 `ssh_tail`。Desktop 已提供同步预览/确认与审计记录入口。C3 与 D 系仍是后续候选；本文下方保留原始方向分析，旧任务勾选状态不代表当前代码状态。
 
 ## [S1] Problem
 
@@ -81,8 +81,8 @@ commits: A1-A2-B1
 ### 与原文「差异化壁垒」的务实表述
 
 - **已具备**：Desktop UI、REST、paramiko 池化 SFTP、10 个 `ssh_*` 工具、Mappings/Exclusions 配置面。  
-- **尚未做完**：Mappings 未真正驱动同步；写操作无 Diff；凭据仍明文；别名未做。  
-- **结论**：「有特色」成立；「成熟全栈产品」需完成 A1–A2、B1 才站得住。
+- **当前已补齐**：Mappings 驱动同步、写前 Diff、Windows DPAPI 凭据加密、Agent 默认主机掩码、目录下载与日志工具。
+- **仍待评估**：跨平台密钥托管、子进程隔离、会话亲和语义及发布材料。
 
 ## [S3] Out of Scope
 
@@ -96,5 +96,6 @@ commits: A1-A2-B1
 - [x] T2: 实现 A1 Host 别名 — acceptance: 工具/REST 默认掩码 host (covers: S2)
 - [x] T3: 实现 A2 Dry-Run Diff — acceptance: write 支持 dryRun + Desktop 确认 (covers: S2)
 - [x] T4: 实现 B1 Mappings 映射工具 — acceptance: ssh_map_path / /fs/map + upload 自动映射 (covers: S2)
-- [ ] T5: A3 凭据加密 / A4 审计 — (后续)
-- [ ] T6: B2 批量同步 / C 分块读 — (后续)
+- [x] T5: A3 凭据加密 / A4 审计
+- [x] T6: B2 批量同步 / C1 分块读
+- [x] T7: B3 目录下载 / C2 glob 与 tail / Desktop 同步与审计入口

@@ -9,7 +9,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
 from deploy_paths import map_local_to_remote  # noqa: E402
 from sync_plan import plan_sync  # noqa: E402
@@ -87,6 +88,40 @@ class TestChunkRead(unittest.TestCase):
 
 
 class TestSyncPlan(unittest.TestCase):
+    def test_remote_symlink_cannot_escape_allowlist(self):
+        class FakeSftp:
+            def stat(self, path):
+                return object()
+
+            def normalize(self, path):
+                return "/outside/file" if path == "/allowed/link" else path
+
+        with self.assertRaises(ValueError):
+            sftp_client._guard_remote_path(
+                FakeSftp(), {"allowedRemotePaths": ["/allowed"]}, "/allowed/link"
+            )
+
+    def test_sync_respects_nested_exclusions_and_remote_allowlist(self):
+        with tempfile.TemporaryDirectory(dir=ROOT) as tmp:
+            local = Path(tmp) / "proj"
+            (local / "sub").mkdir(parents=True)
+            (local / "sub" / "keep.txt").write_text("ok", encoding="utf-8")
+            (local / "sub" / "skip.log").write_text("skip", encoding="utf-8")
+            server = {
+                "mappings": [{"localRoot": str(local), "remoteRoot": "/allowed"}],
+                "exclusions": ["sub/*.log"],
+                "allowedLocalPaths": [tmp],
+                "allowedRemotePaths": ["/allowed"],
+            }
+            result = plan_sync(server, str(local), dry_run=True)
+            self.assertEqual([f["rel"] for f in result["files"]], ["sub/keep.txt"])
+            (local / "sub" / "keep.txt").write_text("changed size", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "plan changed"):
+                plan_sync(server, str(local), dry_run=False, expected_files=result["files"])
+            server["allowedRemotePaths"] = ["/different"]
+            with self.assertRaises(ValueError):
+                plan_sync(server, str(local), dry_run=True)
+
     def test_dry_run_lists_mapped_files(self):
         os.environ["HERMES_HOME"] = tempfile.mkdtemp()
         with tempfile.TemporaryDirectory() as tmp:

@@ -11,9 +11,9 @@ Repository: https://github.com/1240037688/ssh-plugin
 
 | Surface | What you get |
 |---------|----------------|
-| **Desktop** | Route `/ssh-deploy`（侧栏 SSH 部署）：服务器列表、远程树、编辑器、图片预览、连接测试、Mappings/Exclusions、**写前 Diff 确认** |
+| **Desktop** | Route `/ssh-deploy`（侧栏 SSH 部署）：服务器列表、远程树、编辑器、图片预览、连接测试、Mappings/Exclusions、**写前 Diff 确认**、批量同步预览与审计记录 |
 | **Backend** | FastAPI router at `/api/plugins/ssh-plugin/` |
-| **Agent tools** | `ssh_list_servers` `ssh_health` `ssh_ls` `ssh_read_file` `ssh_write_file` `ssh_map_path` `ssh_mkdir` `ssh_delete` `ssh_upload` `ssh_download` `ssh_exec` |
+| **Agent tools** | `ssh_list_servers` `ssh_health` `ssh_ls` `ssh_read_file` `ssh_write_file` `ssh_map_path` `ssh_mkdir` `ssh_delete` `ssh_upload` `ssh_download` `ssh_download_tree` `ssh_glob` `ssh_tail` `ssh_sync` `ssh_exec` |
 | **Security** | Secret masking, host mask for agents, path allowlists, command whitelist, dry-run writes |
 
 ## Layout
@@ -44,14 +44,14 @@ ssh-plugin/
 python -m pip install "paramiko>=3.0.0"
 ```
 
-2. **Copy package** into Hermes plugin root:
+2. **Install package** into the active Hermes profile's plugin root. Use the profile selected by Hermes; the `code` profile on this machine uses `D:\hermes\profiles\code\plugins\ssh-plugin`.
 
 ```bash
-# Linux / macOS
-cp -R . "$HOME/.hermes/plugins/ssh-plugin"
+# Linux / macOS (replace the profile path as needed)
+git clone https://github.com/1240037688/ssh-plugin "$HOME/.hermes/plugins/ssh-plugin"
 
-# Windows (PowerShell) — use your real HERMES_HOME
-Copy-Item -Recurse -Force . "$env:USERPROFILE\.hermes\plugins\ssh-plugin"
+# Windows (PowerShell) — replace with the active profile path
+git clone https://github.com/1240037688/ssh-plugin "D:\hermes\profiles\code\plugins\ssh-plugin"
 ```
 
 3. **Enable Python half** in `$HERMES_HOME/config.yaml`:
@@ -72,6 +72,9 @@ plugins:
 - `ssh_write_file` — set `dryRun: true` to get a unified diff first
 - `ssh_map_path` — PyCharm-style local ↔ remote mapping
 - `ssh_upload` — optional `remotePath` (auto-mapped from local when omitted)
+- `ssh_download_tree` — bounded directory download to an allowed local path; dry-run by default
+- `ssh_glob` / `ssh_tail` — bounded remote result search and log tail
+- `ssh_sync` — batch upload via mappings; dry-run by default
 - `ssh_exec` — only if `allow_exec`; prefer `commandWhitelist`
 
 See `skills/perf-loop/SKILL.md` for a staged prompt plan (P0–P6) used with external performance plugins.

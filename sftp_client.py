@@ -190,8 +190,41 @@ def PathLike(name: str):
     return PurePosixPath(name)
 
 
+def _guard_remote_path(sftp, server: dict[str, Any], path: str) -> None:
+    """Check the SFTP server's resolved path, including symlinked ancestors."""
+    allowed = server.get("allowedRemotePaths") or []
+    if not allowed:
+        return
+    try:
+        from .deployment_store import safe_remote_path
+    except ImportError:
+        from deployment_store import safe_remote_path  # type: ignore
+
+    safe_remote_path(path, allowed)
+    ancestor = path
+    missing: list[str] = []
+    while True:
+        try:
+            sftp.stat(ancestor)
+            break
+        except OSError as exc:
+            import errno
+
+            if exc.errno != errno.ENOENT:
+                raise
+            if ancestor == "/":
+                raise
+            ancestor, leaf = ancestor.rsplit("/", 1)
+            ancestor = ancestor or "/"
+            missing.insert(0, leaf)
+    real = sftp.normalize(ancestor).rstrip("/") or "/"
+    resolved = real.rstrip("/") + ("/" + "/".join(missing) if missing else "")
+    safe_remote_path(resolved, allowed)
+
+
 def list_dir(server: dict[str, Any], path: str) -> dict[str, Any]:
     with RemoteSession(session_server(server)) as sess:
+        _guard_remote_path(sess.sftp, server, path)
         items = []
         for attr in sess.sftp.listdir_attr(path):
             name = attr.filename
@@ -207,6 +240,7 @@ def list_dir(server: dict[str, Any], path: str) -> dict[str, Any]:
 
 def read_text(server: dict[str, Any], path: str, max_bytes: int = MAX_READ_BYTES) -> dict[str, Any]:
     with RemoteSession(session_server(server)) as sess:
+        _guard_remote_path(sess.sftp, server, path)
         with sess.sftp.open(path, "rb") as f:
             f.prefetch()
             data = f.read(max_bytes + 1)
@@ -231,6 +265,7 @@ def read_text_chunk(
     offset = max(0, int(offset or 0))
     limit = min(max(1, int(limit or CHUNK_DEFAULT)), CHUNK_MAX)
     with RemoteSession(session_server(server)) as sess:
+        _guard_remote_path(sess.sftp, server, path)
         with sess.sftp.open(path, "rb") as f:
             try:
                 size = f.stat().st_size
@@ -258,6 +293,7 @@ def write_text(server: dict[str, Any], path: str, content: str) -> dict[str, Any
     if len(raw) > MAX_UPLOAD_BYTES:
         raise SftpError("content too large")
     with RemoteSession(session_server(server)) as sess:
+        _guard_remote_path(sess.sftp, server, path)
         _ensure_parent(sess.sftp, path)
         with sess.sftp.open(path, "wb") as f:
             f.write(raw)
@@ -268,6 +304,7 @@ def upload_bytes(server: dict[str, Any], path: str, data: bytes) -> dict[str, An
     if len(data) > MAX_UPLOAD_BYTES:
         raise SftpError("upload too large")
     with RemoteSession(session_server(server)) as sess:
+        _guard_remote_path(sess.sftp, server, path)
         _ensure_parent(sess.sftp, path)
         with sess.sftp.open(path, "wb") as f:
             f.write(data)
@@ -276,8 +313,63 @@ def upload_bytes(server: dict[str, Any], path: str, data: bytes) -> dict[str, An
 
 def download_bytes(server: dict[str, Any], path: str) -> bytes:
     with RemoteSession(session_server(server)) as sess:
+        _guard_remote_path(sess.sftp, server, path)
         with sess.sftp.open(path, "rb") as f:
             return f.read(MAX_UPLOAD_BYTES + 1)
+
+
+def glob_files(server: dict[str, Any], root: str, pattern: str, max_results: int = 500) -> dict[str, Any]:
+    """Find remote files under root with a bounded SFTP walk."""
+    from pathlib import PurePosixPath
+    try:
+        from .deployment_store import _glob_match, safe_remote_path
+    except ImportError:
+        from deployment_store import _glob_match, safe_remote_path  # type: ignore
+    root = safe_remote_path(root, server.get("allowedRemotePaths") or None)
+    if not pattern or pattern.startswith("/") or ".." in PurePosixPath(pattern).parts:
+        raise ValueError("pattern must be relative to root")
+    max_results = min(max(1, int(max_results)), 5000)
+    matches = []
+    visited = 0
+    with RemoteSession(session_server(server)) as sess:
+        pending = [(root, "")]
+        while pending:
+            folder, rel_dir = pending.pop()
+            _guard_remote_path(sess.sftp, server, folder)
+            for attr in sess.sftp.listdir_attr(folder):
+                name = attr.filename
+                if name in (".", "..") or "/" in name or "\\" in name:
+                    continue
+                visited += 1
+                if visited > 10000:
+                    raise SftpError("remote search exceeds entry limit")
+                rel = f"{rel_dir}/{name}".lstrip("/")
+                path = folder.rstrip("/") + "/" + name
+                mode = attr.st_mode or 0
+                if stat.S_ISLNK(mode):
+                    continue
+                _guard_remote_path(sess.sftp, server, path)
+                if stat.S_ISDIR(mode):
+                    pending.append((path, rel))
+                elif _glob_match(rel, pattern):
+                    matches.append({"path": path, "relativePath": rel, "bytes": int(attr.st_size or 0)})
+                    if len(matches) >= max_results:
+                        return {"root": root, "pattern": pattern, "matches": matches, "truncated": True}
+    return {"root": root, "pattern": pattern, "matches": matches, "truncated": False}
+
+
+def tail_text(server: dict[str, Any], path: str, limit: int = 65536) -> dict[str, Any]:
+    """Read the final byte window of a remote UTF-8 log."""
+    limit = min(max(1, int(limit)), CHUNK_MAX)
+    with RemoteSession(session_server(server)) as sess:
+        _guard_remote_path(sess.sftp, server, path)
+        size = int(sess.sftp.stat(path).st_size)
+        offset = max(0, size - limit)
+        with sess.sftp.open(path, "rb") as source:
+            source.seek(offset)
+            data = source.read(limit)
+    return {"path": path, "content": data.decode("utf-8", errors="replace"),
+            "offset": offset, "bytes": len(data), "fileSize": size}
 
 
 def preview_image(server: dict[str, Any], path: str) -> dict[str, Any]:
@@ -298,18 +390,22 @@ def preview_image(server: dict[str, Any], path: str) -> dict[str, Any]:
 
 def mkdir(server: dict[str, Any], path: str) -> dict[str, Any]:
     with RemoteSession(session_server(server)) as sess:
+        _guard_remote_path(sess.sftp, server, path)
         sess.sftp.mkdir(path)
     return {"path": path, "ok": True}
 
 
 def rename(server: dict[str, Any], src: str, dst: str) -> dict[str, Any]:
     with RemoteSession(session_server(server)) as sess:
+        _guard_remote_path(sess.sftp, server, src)
+        _guard_remote_path(sess.sftp, server, dst)
         sess.sftp.posix_rename(src, dst)
     return {"from": src, "to": dst, "ok": True}
 
 
 def delete(server: dict[str, Any], path: str, recursive: bool = False) -> dict[str, Any]:
     with RemoteSession(session_server(server)) as sess:
+        _guard_remote_path(sess.sftp, server, path)
         try:
             st = sess.sftp.stat(path)
         except FileNotFoundError as exc:

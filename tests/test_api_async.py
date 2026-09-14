@@ -71,6 +71,29 @@ class TestDefaultTimeout(unittest.TestCase):
         self.assertEqual(kwargs["banner_timeout"], 10.0)
         self.assertEqual(kwargs["auth_timeout"], 10.0)
 
+    def test_failed_connection_releases_server_lock(self):
+        import ssh_session as ss
+
+        server = {"id": "failed-lock-test"}
+        with patch.object(ss, "_open", side_effect=RuntimeError("connect failed")):
+            with self.assertRaises(RuntimeError):
+                with ss.get_session(server):
+                    pass
+        entry = ss._entry_for(server)
+        acquired = []
+        import threading
+
+        def try_lock():
+            ok = entry.lock.acquire(timeout=0.2)
+            acquired.append(ok)
+            if ok:
+                entry.lock.release()
+
+        thread = threading.Thread(target=try_lock)
+        thread.start()
+        thread.join(timeout=1)
+        self.assertEqual(acquired, [True])
+
 
 if __name__ == "__main__":
     unittest.main()

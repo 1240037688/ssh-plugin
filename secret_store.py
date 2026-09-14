@@ -1,9 +1,8 @@
 """Encrypt secret fields at rest with Windows DPAPI (CurrentUser).
 
-Fallback (non-Windows or DPAPI failure): mark values as plaintext with a
-``plain:`` prefix so operators can see the gap. Encryption is best-effort
-and transparent to callers — load() returns usable strings; save() writes
-the on-disk encoding.
+Non-Windows fallback marks values as plaintext with a ``plain:`` prefix.
+On Windows, an encryption failure stops the save rather than writing plaintext.
+Load returns usable strings; save writes the on-disk encoding.
 """
 
 from __future__ import annotations
@@ -38,7 +37,7 @@ def _blob(data: bytes) -> _DATA_BLOB:
 
 
 def dpapi_protect(plaintext: str) -> str:
-    """Return ``enc:dpapi:v1:<b64>`` or ``plain:<value>`` fallback."""
+    """Encrypt on Windows, or mark plaintext on non-Windows."""
     raw = plaintext.encode("utf-8")
     if not _is_windows():
         return PLAIN_PREFIX + plaintext
@@ -56,14 +55,14 @@ def dpapi_protect(plaintext: str) -> str:
             ctypes.byref(out_blob),
         )
         if not ok:
-            return PLAIN_PREFIX + plaintext
+            raise RuntimeError("Windows DPAPI encryption failed; credentials were not saved")
         try:
             enc = ctypes.string_at(out_blob.pbData, out_blob.cbData)
         finally:
             ctypes.windll.kernel32.LocalFree(out_blob.pbData)
         return ENCRYPTED_PREFIX + base64.b64encode(enc).decode("ascii")
-    except Exception:
-        return PLAIN_PREFIX + plaintext
+    except Exception as exc:
+        raise RuntimeError("Windows DPAPI encryption failed; credentials were not saved") from exc
 
 
 def dpapi_unprotect(stored: str) -> str:
@@ -116,7 +115,8 @@ def encrypt_server_secrets(server: dict[str, Any]) -> dict[str, Any]:
         if not val or is_encrypted(val):
             continue
         if isinstance(val, str) and val.startswith(PLAIN_PREFIX):
-            continue
+            if not _is_windows():
+                continue
         out[key] = dpapi_protect(str(val))
     return out
 

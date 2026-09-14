@@ -108,7 +108,7 @@ def load() -> dict[str, Any]:
     if migrate:
         try:
             save(result)
-        except OSError:
+        except (OSError, RuntimeError):
             pass
     return result
 

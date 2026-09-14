@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import errno
 from typing import Any
 
 try:
@@ -164,8 +165,9 @@ def ssh_write_file(args: dict, **kwargs) -> str:
         old = ""
         try:
             old = sftp_client.read_text(server, path)["content"]
-        except Exception:
-            old = ""
+        except OSError as exc:
+            if exc.errno != errno.ENOENT:
+                raise
         meta = unified_diff(old, new_content, path)
         if dry_run:
             return _ok({"ok": True, "dryRun": True, "written": False, **meta})
@@ -267,6 +269,51 @@ def ssh_download(args: dict, **kwargs) -> str:
         return _ok({"path": path, "localPath": str(local), "bytes": len(data)})
     except Exception as exc:
         _audit("download", None, str(args.get("remotePath") or ""), ok=False, error=str(exc)[:200])
+        return _err(str(exc))
+
+
+def ssh_download_tree(args: dict, **kwargs) -> str:
+    del kwargs
+    try:
+        from .download_plan import download_tree
+    except ImportError:
+        from download_plan import download_tree  # type: ignore
+    try:
+        server = _resolve_server(str(args.get("server") or ""))
+        result = download_tree(
+            server, str(args.get("remoteRoot") or ""), str(args.get("localRoot") or ""),
+            dry_run=True if args.get("dryRun") is None else bool(args["dryRun"]),
+            max_files=int(args.get("maxFiles") or 500),
+        )
+        _audit("download_tree", server, result["remoteRoot"], dryRun=result["dryRun"], count=result["count"])
+        return _ok(result)
+    except Exception as exc:
+        return _err(str(exc))
+
+
+def ssh_glob(args: dict, **kwargs) -> str:
+    del kwargs
+    try:
+        server = _resolve_server(str(args.get("server") or ""))
+        root = deployment_store.safe_remote_path(
+            str(args.get("root") or "/"), server.get("allowedRemotePaths") or None
+        )
+        return _ok(sftp_client.glob_files(
+            server, root, str(args.get("pattern") or ""), int(args.get("maxResults") or 500)
+        ))
+    except Exception as exc:
+        return _err(str(exc))
+
+
+def ssh_tail(args: dict, **kwargs) -> str:
+    del kwargs
+    try:
+        server = _resolve_server(str(args.get("server") or ""))
+        path = deployment_store.safe_remote_path(
+            str(args.get("path") or ""), server.get("allowedRemotePaths") or None
+        )
+        return _ok(sftp_client.tail_text(server, path, int(args.get("limit") or 65536)))
+    except Exception as exc:
         return _err(str(exc))
 
 

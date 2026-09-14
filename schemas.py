@@ -146,6 +146,40 @@ SSH_DOWNLOAD = {
     },
 }
 
+SSH_DOWNLOAD_TREE = {
+    "name": "ssh_download_tree",
+    "description": "Plan or download a remote directory into an allowed local workspace. Dry-run is the default; symlinks are skipped.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "server": {"type": "string"},
+            "remoteRoot": {"type": "string"},
+            "localRoot": {"type": "string"},
+            "dryRun": {"type": "boolean"},
+            "maxFiles": {"type": "integer"},
+        },
+        "required": ["server", "remoteRoot", "localRoot"],
+    },
+}
+
+SSH_GLOB = {
+    "name": "ssh_glob",
+    "description": "Find remote files matching a relative glob under a root directory; results are bounded.",
+    "parameters": {"type": "object", "properties": {
+        "server": {"type": "string"}, "root": {"type": "string"},
+        "pattern": {"type": "string"}, "maxResults": {"type": "integer"},
+    }, "required": ["server", "root", "pattern"]},
+}
+
+SSH_TAIL = {
+    "name": "ssh_tail",
+    "description": "Read up to 1MB from the end of a remote UTF-8 log file.",
+    "parameters": {"type": "object", "properties": {
+        "server": {"type": "string"}, "path": {"type": "string"},
+        "limit": {"type": "integer", "description": "Byte limit; default 65536, maximum 1000000"},
+    }, "required": ["server", "path"]},
+}
+
 SSH_EXEC = {
     "name": "ssh_exec",
     "description": (
@@ -207,6 +241,9 @@ ALL_SCHEMAS = [
     SSH_DELETE,
     SSH_UPLOAD,
     SSH_DOWNLOAD,
+    SSH_DOWNLOAD_TREE,
+    SSH_GLOB,
+    SSH_TAIL,
     SSH_SYNC,
     SSH_EXEC,
 ]

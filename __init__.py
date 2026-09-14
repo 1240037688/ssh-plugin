@@ -23,6 +23,9 @@ def register(ctx) -> None:
         (schemas.SSH_DELETE, tools.ssh_delete),
         (schemas.SSH_UPLOAD, tools.ssh_upload),
         (schemas.SSH_DOWNLOAD, tools.ssh_download),
+        (schemas.SSH_DOWNLOAD_TREE, tools.ssh_download_tree),
+        (schemas.SSH_GLOB, tools.ssh_glob),
+        (schemas.SSH_TAIL, tools.ssh_tail),
         (schemas.SSH_SYNC, tools.ssh_sync),
         (schemas.SSH_EXEC, tools.ssh_exec),
     ]

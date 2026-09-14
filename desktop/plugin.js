@@ -134,7 +134,10 @@ const LOCALES = {
     deleted: '已删除',
     renamed: '已重命名',
     testOk: '连接成功',
-    testFail: '连接失败'
+    testFail: '连接失败',
+    operations: '同步 / 审计', previewSync: '预览同步', confirmSync: '确认批量上传？',
+    syncNow: '执行同步', auditRefresh: '刷新审计', syncLocalRoot: '本地根目录（留空使用首条映射）',
+    syncResult: '待上传 {count} 个文件', auditEmpty: '暂无审计记录'
   },
   en: {
     nav: 'SSH Deploy',
@@ -224,7 +227,10 @@ const LOCALES = {
     deleted: 'Deleted',
     renamed: 'Renamed',
     testOk: 'Connected',
-    testFail: 'Connection failed'
+    testFail: 'Connection failed',
+    operations: 'Sync / Audit', previewSync: 'Preview sync', confirmSync: 'Upload these files?',
+    syncNow: 'Run sync', auditRefresh: 'Refresh audit', syncLocalRoot: 'Local root (blank: first mapping)',
+    syncResult: '{count} files to upload', auditEmpty: 'No audit entries'
   }
 }
 
@@ -338,6 +344,7 @@ async function loadServers() {
 async function deleteServerById(id) {
   if (!id) return
   await ctxRest('/servers/' + encodeURIComponent(id), { method: 'DELETE' })
+  if ($pendingWrite.get()?.id === id) $pendingWrite.set(null)
   notify('success', tOf(localeCache, 'deleted'))
   if ($selectedId.get() === id) {
     treeEpoch += 1
@@ -464,6 +471,7 @@ async function commitPendingWrite() {
   if (!pending) return
   $pendingWrite.set(null)
   try {
+    if (!$servers.get().some(s => s.id === pending.id)) throw new Error('Server no longer exists')
     await ctxRest('/fs/write', {
       method: 'POST',
       body: { id: pending.id, path: pending.path, content: pending.content, dryRun: false }
@@ -1546,6 +1554,81 @@ function ServerTopBar({ t, onEdit, onAdd }) {
   })
 }
 
+function OperationsPanel({ t, selected }) {
+  const [open, setOpen] = useState(false)
+  const [localRoot, setLocalRoot] = useState('')
+  const [preview, setPreview] = useState(null)
+  const [audit, setAudit] = useState(null)
+  const [busy, setBusy] = useState(false)
+
+  async function loadAudit() {
+    try {
+      const result = await ctxRest('/audit?limit=30')
+      setAudit(result?.entries || [])
+    } catch (e) {
+      notify('error', String(e?.message || e))
+    }
+  }
+
+  async function previewUpload() {
+    if (!selected) return
+    setBusy(true)
+    try {
+      const result = await ctxRest('/fs/sync', {
+        method: 'POST',
+        body: { id: selected, localRoot: localRoot.trim() || null, dryRun: true }
+      })
+      if (!result?.ok) throw new Error(result?.error || 'Sync preview failed')
+      setPreview({ ...result, serverId: selected })
+    } catch (e) {
+      notify('error', String(e?.message || e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return jsxs('div', {
+    className: 'border-b border-(--ui-stroke-secondary) px-3 py-1 text-xs',
+    children: [
+      jsx(Button, { size: 'sm', variant: 'ghost', onClick: () => setOpen(!open), children: t('operations') }),
+      open ? jsxs('div', { className: 'flex flex-wrap items-start gap-2 py-2', children: [
+        jsx(Input, { className: 'max-w-sm', value: localRoot, placeholder: t('syncLocalRoot'),
+          onChange: e => setLocalRoot(e.target.value }),
+        jsx(Button, { size: 'sm', disabled: !selected || busy, onClick: () => void previewUpload(),
+          children: t('previewSync') }),
+        jsx(Button, { size: 'sm', variant: 'outline', onClick: () => void loadAudit(),
+          children: t('auditRefresh') }),
+        audit ? jsx('div', { className: 'max-h-28 w-full overflow-auto text-(--ui-text-secondary)',
+          children: audit.length ? audit.map((e, i) => jsx('div', {
+            children: `${e.ts || ''} · ${e.op || ''} · ${e.serverName || e.serverId || ''} · ${e.ok ? '✓' : '×'} · ${e.path || ''}`
+          }, i)) : t('auditEmpty') }) : null
+      ] }) : null,
+      preview ? jsx(ConfirmDialog, {
+        open: true,
+        title: t('confirmSync'),
+        description: t('syncResult').replace('{count}', String(preview.count || 0)),
+        confirmLabel: t('syncNow'), cancelLabel: t('cancel'),
+        onCancel: () => setPreview(null),
+        onConfirm: () => {
+          const plan = preview
+          setPreview(null)
+          if (!plan || plan.serverId !== $selectedId.get()) return
+          void ctxRest('/fs/sync', { method: 'POST', body: {
+            id: plan.serverId, localRoot: plan.localRoot, dryRun: false,
+            maxFiles: plan.count || 500, expectedFiles: plan.files || []
+          } }).then(result => {
+            if (!result?.ok || result?.errors?.length) throw new Error(result?.error || result.errors.join('\n'))
+            notify('success', t('saved'))
+            void loadAudit()
+          }).catch(e => notify('error', String(e?.message || e)))
+        },
+        children: jsx('pre', { className: 'max-h-40 overflow-auto text-[0.6875rem]',
+          children: (preview.files || []).map(f => f.remotePath).join('\n').slice(0, 8000) })
+      }) : null
+    ]
+  })
+}
+
 function DeployPage({ t }) {
   const servers = useValue($servers)
   const backend = useValue($backendOk)
@@ -1577,6 +1660,7 @@ function DeployPage({ t }) {
             children: t('backendHint')
           })
         : null,
+      jsx(OperationsPanel, { t, selected }),
       jsxs('div', {
         className: 'flex min-h-0 flex-1',
         children: [
