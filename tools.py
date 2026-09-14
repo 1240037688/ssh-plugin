@@ -7,10 +7,17 @@ from typing import Any
 
 try:
     from . import deployment_store, sftp_client
+    from .deploy_paths import agent_list_servers, map_local_to_remote, map_remote_to_local, unified_diff
     from .security import validate_local_path
 except ImportError:
     import deployment_store  # type: ignore
     import sftp_client  # type: ignore
+    from deploy_paths import (  # type: ignore
+        agent_list_servers,
+        map_local_to_remote,
+        map_remote_to_local,
+        unified_diff,
+    )
     from security import validate_local_path  # type: ignore
 
 
@@ -30,13 +37,21 @@ def _resolve_server(name: str) -> dict[str, Any]:
 
 
 def ssh_list_servers(args: dict, **kwargs) -> str:
-    del args, kwargs
+    del kwargs
     try:
+        unmask = bool((args or {}).get("unmask"))
         data = deployment_store.load()
+        full = data["servers"]
+        servers = (
+            [deployment_store.public_server(s) for s in full]
+            if unmask
+            else agent_list_servers(full)
+        )
         return _ok(
             {
-                "servers": deployment_store.list_servers(),
+                "servers": servers,
                 "defaultServerId": data.get("defaultServerId"),
+                "hostMasked": not unmask,
             }
         )
     except Exception as exc:
@@ -88,7 +103,34 @@ def ssh_write_file(args: dict, **kwargs) -> str:
         content = args.get("content")
         if content is None:
             return _err("content is required")
-        return _ok(sftp_client.write_text(server, path, str(content)))
+        new_content = str(content)
+        dry_run = bool(args.get("dryRun") or args.get("dry_run"))
+        old = ""
+        try:
+            old = sftp_client.read_text(server, path)["content"]
+        except Exception:
+            old = ""
+        meta = unified_diff(old, new_content, path)
+        if dry_run:
+            return _ok({"ok": True, "dryRun": True, "written": False, **meta})
+        result = sftp_client.write_text(server, path, new_content)
+        return _ok({"ok": True, "dryRun": False, "written": True, **result, **{
+            k: meta[k] for k in ("addedLines", "removedLines", "identical")
+        }})
+    except Exception as exc:
+        return _err(str(exc))
+
+
+def ssh_map_path(args: dict, **kwargs) -> str:
+    del kwargs
+    try:
+        server = _resolve_server(str(args.get("server") or ""))
+        direction = str(args.get("direction") or "local_to_remote").lower()
+        if direction in ("local_to_remote", "l2r", "to_remote"):
+            return _ok(map_local_to_remote(server, str(args.get("path") or "")))
+        if direction in ("remote_to_local", "r2l", "to_local"):
+            return _ok(map_remote_to_local(server, str(args.get("path") or "")))
+        return _err("direction must be local_to_remote or remote_to_local")
     except Exception as exc:
         return _err(str(exc))
 
@@ -126,9 +168,18 @@ def ssh_upload(args: dict, **kwargs) -> str:
         local = validate_local_path(str(args.get("localPath") or ""), server)
         if not local.is_file():
             return _err(f"local file not found: {local}")
+        remote_raw = args.get("remotePath")
+        if not remote_raw:
+            mapped = map_local_to_remote(server, str(local))
+            if not mapped.get("ok"):
+                return _err(str(mapped.get("error") or "cannot map local path"), mapped=mapped)
+            remote_raw = mapped["remotePath"]
         path = deployment_store.safe_remote_path(
-            str(args.get("remotePath") or ""), server.get("allowedRemotePaths") or None
+            str(remote_raw), server.get("allowedRemotePaths") or None
         )
+        dry_run = bool(args.get("dryRun") or args.get("dry_run"))
+        if dry_run:
+            return _ok({"ok": True, "dryRun": True, "localPath": str(local), "remotePath": path, "bytes": local.stat().st_size})
         return _ok(sftp_client.upload_bytes(server, path, local.read_bytes()))
     except Exception as exc:
         return _err(str(exc))

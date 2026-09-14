@@ -2,8 +2,20 @@
 
 SSH_LIST_SERVERS = {
     "name": "ssh_list_servers",
-    "description": "List configured SSH deployment servers (no secrets). Use before other ssh_* tools to pick a server name or id.",
-    "parameters": {"type": "object", "properties": {}, "required": []},
+    "description": (
+        "List configured SSH deployment servers. "
+        "By default host/username are masked (***); set unmask=true only when the operator explicitly needs the real endpoint."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "unmask": {
+                "type": "boolean",
+                "description": "If true, return real host/username (still no passwords). Default false.",
+            }
+        },
+        "required": [],
+    },
 }
 
 SSH_LS = {
@@ -34,15 +46,39 @@ SSH_READ_FILE = {
 
 SSH_WRITE_FILE = {
     "name": "ssh_write_file",
-    "description": "Create or overwrite a remote text file over SFTP. Parent directories are created if missing.",
+    "description": (
+        "Create or overwrite a remote text file over SFTP. "
+        "Pass dryRun=true to preview a unified diff without writing. Prefer dryRun before production overwrites."
+    ),
     "parameters": {
         "type": "object",
         "properties": {
             "server": {"type": "string"},
             "path": {"type": "string"},
             "content": {"type": "string", "description": "Full file content (UTF-8)"},
+            "dryRun": {"type": "boolean", "description": "If true, only compute the diff"},
         },
         "required": ["server", "path", "content"],
+    },
+}
+
+SSH_MAP_PATH = {
+    "name": "ssh_map_path",
+    "description": (
+        "Translate a path using the server's PyCharm-style mappings. "
+        "direction=local_to_remote or remote_to_local."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "server": {"type": "string"},
+            "path": {"type": "string"},
+            "direction": {
+                "type": "string",
+                "description": "local_to_remote | remote_to_local",
+            },
+        },
+        "required": ["server", "path"],
     },
 }
 
@@ -73,8 +109,8 @@ SSH_DELETE = {
 SSH_UPLOAD = {
     "name": "ssh_upload",
     "description": (
-        "Upload a local file to a remote path over SFTP. "
-        "Local path must stay under process cwd or the server's allowedLocalPaths."
+        "Upload a local file over SFTP. remotePath optional if the local path sits under a mapping. "
+        "dryRun=true returns the resolved remote path without writing."
     ),
     "parameters": {
         "type": "object",
@@ -82,8 +118,9 @@ SSH_UPLOAD = {
             "server": {"type": "string"},
             "localPath": {"type": "string"},
             "remotePath": {"type": "string"},
+            "dryRun": {"type": "boolean"},
         },
-        "required": ["server", "localPath", "remotePath"],
+        "required": ["server", "localPath"],
     },
 }
 
@@ -142,6 +179,7 @@ ALL_SCHEMAS = [
     SSH_LS,
     SSH_READ_FILE,
     SSH_WRITE_FILE,
+    SSH_MAP_PATH,
     SSH_MKDIR,
     SSH_DELETE,
     SSH_UPLOAD,

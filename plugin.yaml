@@ -14,6 +14,7 @@ provides_tools:
   - ssh_ls
   - ssh_read_file
   - ssh_write_file
+  - ssh_map_path
   - ssh_mkdir
   - ssh_delete
   - ssh_upload

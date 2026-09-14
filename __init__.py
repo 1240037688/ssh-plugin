@@ -18,6 +18,7 @@ def register(ctx) -> None:
         (schemas.SSH_LS, tools.ssh_ls),
         (schemas.SSH_READ_FILE, tools.ssh_read_file),
         (schemas.SSH_WRITE_FILE, tools.ssh_write_file),
+        (schemas.SSH_MAP_PATH, tools.ssh_map_path),
         (schemas.SSH_MKDIR, tools.ssh_mkdir),
         (schemas.SSH_DELETE, tools.ssh_delete),
         (schemas.SSH_UPLOAD, tools.ssh_upload),

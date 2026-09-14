@@ -1,14 +1,16 @@
 ---
 feature: improvement-roadmap
-status: designed
+status: in-progress
 updated: 2026-09-14
 branch: feature/ssh-deploy
-commits: pending
+commits: A1-A2-B1
 ---
 
 # improvement-roadmap：竞品分析解读与改进学习方向
 
 ## Report
+
+**Partial delivery** — 已实现 A1 别名掩码（Agent 默认 `host/username=***`）、A2 写前 Dry-Run Diff（工具 + Desktop 确认框）、B1 `ssh_map_path` / `/fs/map` 与 upload 可自动映射。A3/A4、B2/B3、C 系待后续。
 
 ## [S1] Problem
 
@@ -90,7 +92,9 @@ commits: pending
 
 ## Tasks
 
-- [ ] T1: 本方向文档入库 — acceptance: 文件存在且结构完整 (covers: S1/S2)
-- [ ] T2:（待选）实现 A1 Host 别名 — acceptance: 工具/REST 默认掩码 host (covers: S2)
-- [ ] T3:（待选）实现 A2 Dry-Run Diff — acceptance: write 支持 dryRun + Desktop 确认 (covers: S2)
-- [ ] T4:（待选）实现 B1 Mappings 驱动上传 — acceptance: 本地路径可映射上传 (covers: S2)
+- [x] T1: 本方向文档入库 — acceptance: 文件存在且结构完整 (covers: S1/S2)
+- [x] T2: 实现 A1 Host 别名 — acceptance: 工具/REST 默认掩码 host (covers: S2)
+- [x] T3: 实现 A2 Dry-Run Diff — acceptance: write 支持 dryRun + Desktop 确认 (covers: S2)
+- [x] T4: 实现 B1 Mappings 映射工具 — acceptance: ssh_map_path / /fs/map + upload 自动映射 (covers: S2)
+- [ ] T5: A3 凭据加密 / A4 审计 — (后续)
+- [ ] T6: B2 批量同步 / C 分块读 — (后续)

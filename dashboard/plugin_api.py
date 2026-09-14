@@ -34,6 +34,16 @@ try:
 except ImportError:
     from ..security import security_warnings  # type: ignore
 
+try:
+    from deploy_paths import agent_list_servers, map_local_to_remote, map_remote_to_local, unified_diff
+except ImportError:
+    from ..deploy_paths import (  # type: ignore
+        agent_list_servers,
+        map_local_to_remote,
+        map_remote_to_local,
+        unified_diff,
+    )
+
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "[::1]"})
 
 
@@ -108,6 +118,13 @@ class WriteIn(BaseModel):
     id: str
     path: str
     content: str = ""
+    dryRun: bool = False
+
+
+class MapIn(BaseModel):
+    id: str
+    path: str
+    direction: str = "local_to_remote"
 
 
 class MkdirIn(BaseModel):
@@ -177,14 +194,18 @@ async def conn_stats() -> dict[str, Any]:
 
 
 @router.get("/servers")
-async def servers() -> dict[str, Any]:
-    listed = deployment_store.list_servers()
-    # Attach non-secret security gap notes (computed from stored policy fields).
-    full = {s["id"]: s for s in deployment_store.load()["servers"]}
+async def servers(mask: bool = False) -> dict[str, Any]:
+    data = deployment_store.load()
+    full_servers = data["servers"]
+    if mask:
+        listed = agent_list_servers(full_servers)
+    else:
+        listed = [deployment_store.public_server(s) for s in full_servers]
     for item in listed:
-        raw = full.get(item["id"]) or item
+        raw = next((s for s in full_servers if s["id"] == item.get("id")), None) or item
         item["securityWarnings"] = security_warnings(raw)
-    return {"servers": listed, "defaultServerId": deployment_store.load().get("defaultServerId")}
+        item["hostMasked"] = bool(mask)
+    return {"servers": listed, "defaultServerId": data.get("defaultServerId")}
 
 
 @router.post("/servers")
@@ -271,9 +292,37 @@ async def fs_write(body: WriteIn) -> dict[str, Any]:
     server = _server_or_404(body.id)
     p = _safe_path(server, body.path)
     try:
-        return sftp_client.write_text(server, p, body.content)
+        old = ""
+        try:
+            old = sftp_client.read_text(server, p)["content"]
+        except Exception:
+            old = ""
+        meta = unified_diff(old, body.content, p)
+        if body.dryRun:
+            return {"ok": True, "dryRun": True, "written": False, **meta}
+        result = sftp_client.write_text(server, p, body.content)
+        return {
+            "ok": True,
+            "dryRun": False,
+            "written": True,
+            **result,
+            "addedLines": meta["addedLines"],
+            "removedLines": meta["removedLines"],
+            "identical": meta["identical"],
+        }
     except Exception as exc:
         raise _err(exc, 502) from exc
+
+
+@router.post("/fs/map")
+async def fs_map(body: MapIn) -> dict[str, Any]:
+    server = _server_or_404(body.id)
+    direction = (body.direction or "local_to_remote").lower()
+    if direction in ("local_to_remote", "l2r", "to_remote"):
+        return map_local_to_remote(server, body.path)
+    if direction in ("remote_to_local", "r2l", "to_local"):
+        return map_remote_to_local(server, body.path)
+    raise HTTPException(status_code=400, detail="direction must be local_to_remote or remote_to_local")
 
 
 @router.post("/fs/mkdir")

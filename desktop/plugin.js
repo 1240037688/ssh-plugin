@@ -119,6 +119,9 @@ const LOCALES = {
     placeholderLocal: 'E:/project',
     placeholderRemote: '/var/www/html',
     saved: '已保存',
+    pendingWrite: '确认写入远端？',
+    pendingWriteDesc: '将覆盖远端文件。请检查 diff：',
+    writeStats: '+{added} / -{removed}',
     created: '已创建',
     deleted: '已删除',
     renamed: '已重命名',
@@ -202,6 +205,9 @@ const LOCALES = {
     placeholderLocal: 'E:/project',
     placeholderRemote: '/var/www/html',
     saved: 'Saved',
+    pendingWrite: 'Write to remote?',
+    pendingWriteDesc: 'This overwrites the remote file. Review the diff:',
+    writeStats: '+{added} / -{removed}',
     created: 'Created',
     deleted: 'Deleted',
     renamed: 'Renamed',
@@ -220,6 +226,7 @@ const $listError = atom(null)
 const $openFile = atom(null) // { path, content, truncated, kind: 'text'|'image'|'binary', dataUrl? }
 const $backendOk = atom(null)
 const $editorDirty = atom(false)
+const $pendingWrite = atom(null) // { id, path, content, diff, addedLines, removedLines, identical, emptyRemote }
 
 function tOf(locale, key) {
   const dict = LOCALES[locale] || LOCALES.zh
@@ -365,7 +372,38 @@ async function saveOpenFile() {
   const file = $openFile.get()
   if (!id || !file || file.kind !== 'text') return
   try {
-    await ctxRest('/fs/write', { method: 'POST', body: { id, path: file.path, content: file.content } })
+    const preview = await ctxRest('/fs/write', {
+      method: 'POST',
+      body: { id, path: file.path, content: file.content, dryRun: true }
+    })
+    if (preview?.identical) {
+      $editorDirty.set(false)
+      notify('success', tOf(localeCache, 'saved'))
+      return
+    }
+    $pendingWrite.set({
+      id,
+      path: file.path,
+      content: file.content,
+      diff: preview?.diff || '',
+      addedLines: preview?.addedLines || 0,
+      removedLines: preview?.removedLines || 0,
+      emptyRemote: !!preview?.emptyRemote
+    })
+  } catch (e) {
+    notify('error', String(e?.message || e))
+  }
+}
+
+async function commitPendingWrite() {
+  const pending = $pendingWrite.get()
+  if (!pending) return
+  $pendingWrite.set(null)
+  try {
+    await ctxRest('/fs/write', {
+      method: 'POST',
+      body: { id: pending.id, path: pending.path, content: pending.content, dryRun: false }
+    })
     $editorDirty.set(false)
     notify('success', tOf(localeCache, 'saved'))
     await loadList()
@@ -1217,6 +1255,7 @@ function DeployPage({ t }) {
   const servers = useValue($servers)
   const backend = useValue($backendOk)
   const selected = useValue($selectedId)
+  const pending = useValue($pendingWrite)
   const [editing, setEditing] = useState(undefined) // undefined=hidden, null=create, obj=edit
 
   useEffect(() => {
@@ -1296,6 +1335,29 @@ function DeployPage({ t }) {
               await loadServers()
               await loadList()
             }
+          })
+        : null,
+      pending
+        ? jsx(ConfirmDialog, {
+            open: true,
+            title: t('pendingWrite'),
+            description:
+              t('pendingWriteDesc') +
+              '\n' +
+              pending.path +
+              '\n' +
+              t('writeStats')
+                .replace('{added}', String(pending.addedLines))
+                .replace('{removed}', String(pending.removedLines)),
+            confirmLabel: t('save'),
+            cancelLabel: t('cancel'),
+            onConfirm: () => void commitPendingWrite(),
+            onCancel: () => $pendingWrite.set(null),
+            children: jsx('pre', {
+              className:
+                'mt-2 max-h-48 overflow-auto rounded-md border border-(--ui-stroke-secondary) bg-(--ui-fill-secondary) p-2 text-[0.6875rem] text-(--ui-text-secondary)',
+              children: (pending.diff || '(no textual diff / new file)').slice(0, 8000)
+            })
           })
         : null
     ]
