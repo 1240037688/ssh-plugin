@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SSH Deploy — 浏览器预览</title>
+  <link rel="stylesheet" href="app.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="top">
+      <div>
+        <div class="title">SSH 部署</div>
+        <div class="sub">可视化远程文件 · 对标 PyCharm Deployment · mock 预览</div>
+      </div>
+      <span class="badge" id="backendBadge">本地 mock</span>
+    </header>
+    <div class="body">
+      <aside class="servers">
+        <div class="col-head">
+          <span>服务器</span>
+          <button type="button" id="btnAddServer">添加服务器</button>
+        </div>
+        <ul id="serverList" class="server-list"></ul>
+        <div class="col-foot">
+          <button type="button" id="btnEditServer" class="btn-outline">编辑服务器</button>
+          <button type="button" id="btnTest" class="btn-ghost">测试连接</button>
+          <button type="button" id="btnDefault" class="btn-ghost">设为默认</button>
+        </div>
+      </aside>
+      <main class="files">
+        <div class="toolbar">
+          <button type="button" id="btnUp">上一级</button>
+          <div class="crumbs" id="crumbs"></div>
+          <button type="button" id="btnRefresh">刷新</button>
+          <button type="button" id="btnNewFile" class="btn-outline">新建文件</button>
+          <button type="button" id="btnNewFolder" class="btn-outline">新建目录</button>
+        </div>
+        <div id="fileList" class="file-list"></div>
+      </main>
+      <section class="editor">
+        <div class="editor-bar">
+          <div class="path" id="openPath">选择左侧文件进行编辑或预览</div>
+          <button type="button" id="btnSave" disabled>保存</button>
+        </div>
+        <textarea id="editor" placeholder="" spellcheck="false" disabled></textarea>
+        <div id="imagePreview" class="image-preview hidden"></div>
+      </section>
+    </div>
+  </div>
+  <dialog id="serverDlg">
+    <form method="dialog" id="serverForm">
+      <h3 id="serverDlgTitle">编辑服务器</h3>
+      <div class="grid">
+        <label>显示名称 <input name="name" required /></label>
+        <label>主机 <input name="host" required placeholder="192.168.1.10" /></label>
+        <label>端口 <input name="port" type="number" value="22" /></label>
+        <label>用户名 <input name="username" required /></label>
+        <label>认证
+          <select name="auth">
+            <option value="password">password</option>
+            <option value="key">private key</option>
+            <option value="agent">agent</option>
+          </select>
+        </label>
+        <label>密码 <input name="password" type="password" placeholder="仅保存在 gateway" /></label>
+        <label>本地映射 <input name="localRoot" placeholder="E:/project" /></label>
+        <label>远程映射 <input name="remoteRoot" placeholder="/var/www/html" /></label>
+        <label class="span2">排除 (逗号分隔) <input name="exclusions" placeholder=".git/**, node_modules/**" /></label>
+        <label class="span2"><input type="checkbox" name="allow_exec" /> 允许 ssh_exec</label>
+      </div>
+      <div class="dlg-foot">
+        <button value="cancel" class="btn-ghost">取消</button>
+        <button id="serverSaveBtn" value="save">保存</button>
+      </div>
+    </form>
+  </dialog>
+  <div id="toast" class="toast hidden"></div>
+  <script src="app.js"></script>
+</body>
+</html>

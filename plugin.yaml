@@ -1,0 +1,22 @@
+name: ssh-plugin
+version: 0.1.0
+description: Visual SSH deployment and remote file manager (PyCharm-style Connection/Mappings/Exclusions)
+manifest_version: 2
+api_version: 1
+license: MIT
+tags: [ssh, sftp, deployment, files, desktop]
+provides_tools:
+  - ssh_list_servers
+  - ssh_ls
+  - ssh_read_file
+  - ssh_write_file
+  - ssh_mkdir
+  - ssh_delete
+  - ssh_upload
+  - ssh_download
+  - ssh_exec
+config_schema:
+  default_server:
+    type: str
+    default: ""
+    description: Default server name or id used when tools omit server

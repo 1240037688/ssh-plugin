@@ -1,0 +1,5 @@
+deployments.json
+plugin-data/
+__pycache__/
+*.pyc
+.DS_Store

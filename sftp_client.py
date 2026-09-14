@@ -1,0 +1,338 @@
+"""Thin paramiko SFTP client wrapper used by REST + agent tools."""
+
+from __future__ import annotations
+
+import base64
+import fnmatch
+import io
+import stat
+from datetime import datetime, timezone
+from typing import Any
+
+try:
+    import paramiko
+except ImportError:  # pragma: no cover - surfaced as API error
+    paramiko = None  # type: ignore
+
+MAX_READ_BYTES = 1_000_000
+MAX_PREVIEW_BYTES = 8_000_000
+MAX_UPLOAD_BYTES = 50_000_000
+
+IMAGE_EXT = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg", ".ico"}
+TEXT_EXT = {
+    ".txt", ".md", ".json", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".conf",
+    ".py", ".js", ".ts", ".tsx", ".jsx", ".css", ".html", ".htm", ".xml", ".sh",
+    ".env", ".log", ".csv", ".go", ".rs", ".java", ".c", ".h", ".cpp", ".sql",
+}
+
+
+class SftpError(Exception):
+    pass
+
+
+def require_paramiko() -> Any:
+    if paramiko is None:
+        raise SftpError("paramiko is not installed in the Hermes gateway environment")
+    return paramiko
+
+
+def _connect(server: dict[str, Any]):
+    pk = require_paramiko()
+    host = server.get("host")
+    if not host:
+        raise SftpError("server host is empty")
+    port = int(server.get("port") or 22)
+    username = server.get("username") or ""
+    password = server.get("password") or None
+    timeout = float(server.get("timeout") or 20)
+
+    client = pk.SSHClient()
+    client.set_missing_host_key_policy(pk.AutoAddPolicy())
+    connect_kwargs: dict[str, Any] = {
+        "hostname": host,
+        "port": port,
+        "username": username,
+        "timeout": timeout,
+        "banner_timeout": timeout,
+        "auth_timeout": timeout,
+        "allow_agent": False,
+        "look_for_keys": False,
+    }
+    auth = (server.get("auth") or "password").lower()
+    if auth == "key":
+        key_path = server.get("privateKey")
+        if not key_path:
+            raise SftpError("privateKey path is required for key auth")
+        key = None
+        passphrase = server.get("passphrase") or None
+        data = None
+        # Allow inline key content for tests; otherwise treat as filesystem path
+        content = server.get("privateKeyContent")
+        if content:
+            data = io.StringIO(content)
+        else:
+            data = open(str(key_path).expanduser(), "r", encoding="utf-8")
+        try:
+            for loader in (
+                pk.RSAKey,
+                getattr(pk, "Ed25519Key", None),
+                getattr(pk, "ECDSAKey", None),
+                getattr(pk, "DSSKey", None),
+            ):
+                if loader is None:
+                    continue
+                try:
+                    data.seek(0)
+                    key = loader.from_private_key(data, password=passphrase)
+                    break
+                except Exception:
+                    continue
+        finally:
+            try:
+                data.close()
+            except Exception:
+                pass
+        if key is None:
+            raise SftpError("unable to load private key")
+        connect_kwargs["pkey"] = key
+    elif auth == "agent":
+        connect_kwargs["allow_agent"] = True
+        connect_kwargs["look_for_keys"] = True
+    else:
+        connect_kwargs["password"] = password
+
+    client.connect(**connect_kwargs)
+    return client
+
+
+class RemoteSession:
+    def __init__(self, server: dict[str, Any]):
+        self.server = server
+        self.client = None
+        self.sftp = None
+
+    def __enter__(self) -> "RemoteSession":
+        self.client = _connect(self.server)
+        try:
+            self.sftp = self.client.open_sftp()
+        except Exception as exc:
+            self.client.close()
+            raise SftpError(f"SFTP unavailable: {exc}") from exc
+        return self
+
+    def __exit__(self, *args) -> None:
+        try:
+            if self.sftp is not None:
+                self.sftp.close()
+        except Exception:
+            pass
+        try:
+            if self.client is not None:
+                self.client.close()
+        except Exception:
+            pass
+
+
+def test_connection(server: dict[str, Any]) -> dict[str, Any]:
+    try:
+        with RemoteSession(session_server(server)) as sess:
+            stdin, stdout, stderr = sess.client.exec_command("hostname; uname -a", timeout=15)
+            out = stdout.read().decode("utf-8", errors="replace").strip()
+            lines = out.splitlines()
+            return {
+                "ok": True,
+                "host": server.get("host"),
+                "hostname": lines[0] if lines else None,
+                "info": out[:500],
+            }
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+def session_server(server: dict[str, Any]) -> dict[str, Any]:
+    # Strip masked placeholders before connecting
+    s = dict(server)
+    for k in ("password", "passphrase"):
+        if s.get(k) == "***":
+            s[k] = None
+    if s.get("privateKey") == "***":
+        s["privateKey"] = None
+    return s
+
+
+def _meta(st_mode: int, size: int, mtime: float, name: str) -> dict[str, Any]:
+    is_dir = stat.S_ISDIR(st_mode)
+    return {
+        "name": name,
+        "path": name,
+        "type": "dir" if is_dir else "file",
+        "size": int(size),
+        "mtime": datetime.fromtimestamp(mtime or 0, tz=timezone.utc).isoformat() if mtime else None,
+        "isImage": (not is_dir) and PathLike(name).suffix.lower() in IMAGE_EXT,
+        "isText": (not is_dir) and (
+            PathLike(name).suffix.lower() in TEXT_EXT
+            or PathLike(name).name.startswith(".")
+        ),
+    }
+
+
+def PathLike(name: str):
+    from pathlib import PurePosixPath
+
+    return PurePosixPath(name)
+
+
+def list_dir(server: dict[str, Any], path: str) -> dict[str, Any]:
+    with RemoteSession(session_server(server)) as sess:
+        items = []
+        for attr in sess.sftp.listdir_attr(path):
+            name = attr.filename
+            if name in (".", ".."):
+                continue
+            st = attr.st_mode or 0
+            item = _meta(st, attr.st_size or 0, attr.st_mtime or 0, name)
+            item["path"] = (path.rstrip("/") + "/" + name) if path not in ("", "/") else "/" + name
+            items.append(item)
+        items.sort(key=lambda x: (0 if x["type"] == "dir" else 1, x["name"].lower()))
+        return {"path": path or "/", "entries": items}
+
+
+def read_text(server: dict[str, Any], path: str, max_bytes: int = MAX_READ_BYTES) -> dict[str, Any]:
+    with RemoteSession(session_server(server)) as sess:
+        with sess.sftp.open(path, "rb") as f:
+            f.prefetch()
+            data = f.read(max_bytes + 1)
+        truncated = len(data) > max_bytes
+        if truncated:
+            data = data[:max_bytes]
+        text = data.decode("utf-8", errors="replace")
+        return {"path": path, "content": text, "truncated": truncated, "bytes": len(data)}
+
+
+def write_text(server: dict[str, Any], path: str, content: str) -> dict[str, Any]:
+    raw = content.encode("utf-8")
+    if len(raw) > MAX_UPLOAD_BYTES:
+        raise SftpError("content too large")
+    with RemoteSession(session_server(server)) as sess:
+        _ensure_parent(sess.sftp, path)
+        with sess.sftp.open(path, "wb") as f:
+            f.write(raw)
+    return {"path": path, "bytes": len(raw)}
+
+
+def upload_bytes(server: dict[str, Any], path: str, data: bytes) -> dict[str, Any]:
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise SftpError("upload too large")
+    with RemoteSession(session_server(server)) as sess:
+        _ensure_parent(sess.sftp, path)
+        with sess.sftp.open(path, "wb") as f:
+            f.write(data)
+    return {"path": path, "bytes": len(data)}
+
+
+def download_bytes(server: dict[str, Any], path: str) -> bytes:
+    with RemoteSession(session_server(server)) as sess:
+        with sess.sftp.open(path, "rb") as f:
+            return f.read(MAX_UPLOAD_BYTES + 1)
+
+
+def preview_image(server: dict[str, Any], path: str) -> dict[str, Any]:
+    data = download_bytes(server, path)
+    if len(data) > MAX_PREVIEW_BYTES:
+        raise SftpError("image too large to preview")
+    ext = PathLike(path).suffix.lower().lstrip(".") or "png"
+    if ext == "jpg":
+        ext = "jpeg"
+    mime = "image/svg+xml" if ext == "svg" else f"image/{ext}"
+    return {
+        "path": path,
+        "mime": mime,
+        "bytes": len(data),
+        "dataUrl": f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}",
+    }
+
+
+def mkdir(server: dict[str, Any], path: str) -> dict[str, Any]:
+    with RemoteSession(session_server(server)) as sess:
+        sess.sftp.mkdir(path)
+    return {"path": path, "ok": True}
+
+
+def rename(server: dict[str, Any], src: str, dst: str) -> dict[str, Any]:
+    with RemoteSession(session_server(server)) as sess:
+        sess.sftp.posix_rename(src, dst)
+    return {"from": src, "to": dst, "ok": True}
+
+
+def delete(server: dict[str, Any], path: str, recursive: bool = False) -> dict[str, Any]:
+    with RemoteSession(session_server(server)) as sess:
+        try:
+            st = sess.sftp.stat(path)
+        except FileNotFoundError as exc:
+            raise SftpError(f"not found: {path}") from exc
+        import stat as stmod
+
+        if stmod.S_ISDIR(st.st_mode):
+            if not recursive:
+                raise SftpError("path is a directory; pass recursive=true to delete")
+            _rmtree(sess.sftp, path)
+        else:
+            sess.sftp.remove(path)
+    return {"path": path, "ok": True}
+
+
+def exec_command(server: dict[str, Any], command: str, timeout: int = 30) -> dict[str, Any]:
+    if not server.get("allow_exec"):
+        raise SftpError("ssh_exec is disabled for this server (set allow_exec true)")
+    with RemoteSession(session_server(server)) as sess:
+        stdin, stdout, stderr = sess.client.exec_command(command, timeout=timeout)
+        out = stdout.read().decode("utf-8", errors="replace")
+        err = stderr.read().decode("utf-8", errors="replace")
+        code = stdout.channel.recv_exit_status()
+        return {"command": command, "exitCode": code, "stdout": out[-100000:], "stderr": err[-100000:]}
+
+
+def _ensure_parent(sftp, path: str) -> None:
+    parent = path.rsplit("/", 1)[0]
+    if not parent or parent == "/":
+        return
+    parts = [p for p in parent.split("/") if p]
+    cur = ""
+    for part in parts:
+        cur = f"{cur}/{part}"
+        try:
+            sftp.stat(cur)
+        except IOError:
+            try:
+                sftp.mkdir(cur)
+            except IOError:
+                # concurrent create or permission — re-check
+                sftp.stat(cur)
+
+
+def _rmtree(sftp, path: str) -> None:
+    for attr in sftp.listdir_attr(path):
+        child = path.rstrip("/") + "/" + attr.filename
+        import stat as stmod
+
+        if stmod.S_ISDIR(attr.st_mode or 0):
+            _rmtree(sftp, child)
+        else:
+            sftp.remove(child)
+    sftp.rmdir(path)
+
+
+def filter_excluded(entries: list[dict], exclusions: list[str]) -> list[dict]:
+    if not exclusions:
+        return entries
+    try:
+        from .deployment_store import match_exclusion
+    except ImportError:
+        from deployment_store import match_exclusion  # type: ignore
+
+    out = []
+    for e in entries:
+        if match_exclusion(e.get("name") or "", exclusions):
+            continue
+        out.append(e)
+    return out

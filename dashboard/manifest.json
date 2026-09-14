@@ -1,0 +1,4 @@
+{
+  "name": "ssh-plugin",
+  "api": "plugin_api.py"
+}
