@@ -14,6 +14,7 @@ def register(ctx) -> None:
     """Wire schemas to handlers and bundle the skill."""
     pairs = [
         (schemas.SSH_LIST_SERVERS, tools.ssh_list_servers),
+        (schemas.SSH_HEALTH, tools.ssh_health),
         (schemas.SSH_LS, tools.ssh_ls),
         (schemas.SSH_READ_FILE, tools.ssh_read_file),
         (schemas.SSH_WRITE_FILE, tools.ssh_write_file),

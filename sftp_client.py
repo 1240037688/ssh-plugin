@@ -118,31 +118,27 @@ def _connect(server: dict[str, Any]):
 
 
 class RemoteSession:
+    """Pool-backed SSH session. Reuses keep-alive connections per server id."""
+
     def __init__(self, server: dict[str, Any]):
         self.server = server
         self.client = None
         self.sftp = None
+        self._ctx = None
 
     def __enter__(self) -> "RemoteSession":
-        self.client = _connect(self.server)
         try:
-            self.sftp = self.client.open_sftp()
-        except Exception as exc:
-            self.client.close()
-            raise SftpError(f"SFTP unavailable: {exc}") from exc
+            from .ssh_session import get_session
+        except ImportError:
+            from ssh_session import get_session  # type: ignore
+        self._ctx = get_session(self.server)
+        self.sftp, self.client = self._ctx.__enter__()
         return self
 
-    def __exit__(self, *args) -> None:
-        try:
-            if self.sftp is not None:
-                self.sftp.close()
-        except Exception:
-            pass
-        try:
-            if self.client is not None:
-                self.client.close()
-        except Exception:
-            pass
+    def __exit__(self, *args) -> bool:
+        if self._ctx is not None:
+            return bool(self._ctx.__exit__(*args))
+        return False
 
 
 def test_connection(server: dict[str, Any]) -> dict[str, Any]:
@@ -306,6 +302,22 @@ def exec_command(server: dict[str, Any], command: str, timeout: int = 30) -> dic
         err = stderr.read().decode("utf-8", errors="replace")
         code = stdout.channel.recv_exit_status()
         return {"command": cmd, "exitCode": code, "stdout": out[-100000:], "stderr": err[-100000:]}
+
+
+def health_check(server: dict[str, Any]) -> dict[str, Any]:
+    try:
+        from .ssh_session import health as _health
+    except ImportError:
+        from ssh_session import health as _health  # type: ignore
+    return _health(session_server(server))
+
+
+def pool_stats() -> dict[str, Any]:
+    try:
+        from .ssh_session import stats as _stats
+    except ImportError:
+        from ssh_session import stats as _stats  # type: ignore
+    return _stats()
 
 
 def _ensure_parent(sftp, path: str) -> None:

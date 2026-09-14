@@ -43,6 +43,15 @@ def ssh_list_servers(args: dict, **kwargs) -> str:
         return _err(str(exc))
 
 
+def ssh_health(args: dict, **kwargs) -> str:
+    del kwargs
+    try:
+        server = _resolve_server(str(args.get("server") or ""))
+        return _ok(sftp_client.health_check(server))
+    except Exception as exc:
+        return _err(str(exc))
+
+
 def ssh_ls(args: dict, **kwargs) -> str:
     del kwargs
     try:

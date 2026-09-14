@@ -124,6 +124,17 @@ async def health() -> dict[str, Any]:
     return {"ok": True, "plugin": "ssh-plugin"}
 
 
+@router.get("/health/server")
+async def health_server(id: str) -> dict[str, Any]:
+    server = _server_or_404(id)
+    return sftp_client.health_check(server)
+
+
+@router.get("/conn/stats")
+async def conn_stats() -> dict[str, Any]:
+    return sftp_client.pool_stats()
+
+
 @router.get("/servers")
 async def servers() -> dict[str, Any]:
     listed = deployment_store.list_servers()

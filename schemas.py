@@ -123,8 +123,22 @@ SSH_EXEC = {
     },
 }
 
+SSH_HEALTH = {
+    "name": "ssh_health",
+    "description": (
+        "Probe SSH connectivity for a server (keep-alive pool, latency). "
+        "Call this before a long iteration loop and after connection errors."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {"server": {"type": "string", "description": "Server name or id"}},
+        "required": ["server"],
+    },
+}
+
 ALL_SCHEMAS = [
     SSH_LIST_SERVERS,
+    SSH_HEALTH,
     SSH_LS,
     SSH_READ_FILE,
     SSH_WRITE_FILE,
