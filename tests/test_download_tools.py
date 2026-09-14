@@ -85,18 +85,16 @@ class TestResultTools(unittest.TestCase):
 
     def test_download_tree_reguards_at_open(self):
         """Open must re-check allowlist even if plan-time list succeeded."""
+
         class SwapSftp(FakeSftp):
             def __init__(self):
                 super().__init__()
-                self.opened = []
-
-            def open(self, path, mode):
-                self.opened.append(path)
-                raise ValueError("guard should have rejected this path")
+                self.normalize_calls = 0
 
             def normalize(self, path):
-                # After list, resolve to outside allowlist (symlink swap).
-                if path.endswith("result.log"):
+                self.normalize_calls += 1
+                # Plan walk: 2 guards (folder + file). Open-time re-check is the 3rd.
+                if self.normalize_calls > 2 and str(path).endswith("result.log"):
                     return "/etc/passwd"
                 return path
 
@@ -111,6 +109,12 @@ class TestResultTools(unittest.TestCase):
                     download_plan.download_tree(
                         server, "/allowed", str(Path(tmp) / "out"), dry_run=False
                     )
+            # dry-run never opens; plan-time guards alone must still succeed
+            with patch.object(sftp_client, "RemoteSession", SwapSession):
+                preview = download_plan.download_tree(
+                    server, "/allowed", str(Path(tmp) / "out2"), dry_run=True
+                )
+            self.assertEqual(preview["count"], 1)
 
     def test_glob_and_tail(self):
         server = {"allowedRemotePaths": ["/allowed"]}
