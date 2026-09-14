@@ -1,11 +1,11 @@
 # ssh-plugin — Hermes SSH Deploy
 
-[![CI](https://github.com/OWNER/ssh-plugin/actions/workflows/ci.yml/badge.svg)](../../actions/workflows/ci.yml)
+[![CI](https://github.com/1240037688/ssh-plugin/actions/workflows/ci.yml/badge.svg)](https://github.com/1240037688/ssh-plugin/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Hermes **unified package** plugin: visual SSH/SFTP file manager (PyCharm-style mappings) + keep-alive sessions + Agent tools.
 
-> Replace `OWNER/ssh-plugin` in the badge after you push the repository.
+Repository: https://github.com/1240037688/ssh-plugin
 
 ## Features
 
