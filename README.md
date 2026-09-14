@@ -97,10 +97,9 @@ Contributions: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 Open `preview/index.html` for an offline mock of the three-pane UI (mock filesystem only).
 
-## Related
+## Acknowledgments
 
-- Hermes Desktop Plugin SDK (official docs)
-- Design references used while building: `hermes-vault` (structure/security model), `ssh-mcp-server` (command/path policy ideas)
+See [ACKNOWLEDGMENTS.md](ACKNOWLEDGMENTS.md).
 
 ## License
 
