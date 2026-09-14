@@ -11,6 +11,11 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+try:
+    from .secret_store import decrypt_server_secrets, encrypt_server_secrets
+except ImportError:
+    from secret_store import decrypt_server_secrets, encrypt_server_secrets  # type: ignore
+
 _LOCK = threading.RLock()
 _SECRET_FIELDS = frozenset({"password", "passphrase", "privateKeyContent"})
 
@@ -78,15 +83,29 @@ def load() -> dict[str, Any]:
             return _empty()
         if not isinstance(data, dict):
             return _empty()
-        servers = [_normalize_server(s) for s in data.get("servers") or [] if isinstance(s, dict)]
+        servers = []
+        for s in data.get("servers") or []:
+            if not isinstance(s, dict):
+                continue
+            norm = _normalize_server(s)
+            try:
+                norm = decrypt_server_secrets(norm)
+            except RuntimeError:
+                # Keep encoded value; connect will fail with a clear error
+                pass
+            servers.append(norm)
         return {"servers": servers, "defaultServerId": data.get("defaultServerId")}
 
 
 def save(data: dict[str, Any]) -> None:
     with _LOCK:
         path = _store_path()
+        out = {
+            "servers": [encrypt_server_secrets(s) for s in data.get("servers") or []],
+            "defaultServerId": data.get("defaultServerId"),
+        }
         tmp = path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
         tmp.replace(path)
 
 

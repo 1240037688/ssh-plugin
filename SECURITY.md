@@ -4,7 +4,7 @@
 
 `ssh-plugin` is a **local-first** Hermes unified package. When enabled, it can:
 
-- Hold SSH connection settings (including passwords / key paths) under `$HERMES_HOME/plugin-data/ssh-plugin/deployments.json` (**plaintext** today — see known limitations)
+- Hold SSH connection settings under `$HERMES_HOME/plugin-data/ssh-plugin/deployments.json` (**Windows DPAPI** protects secret fields at rest; see limitations)
 - Perform SFTP list/read/write/delete/upload/download against configured hosts
 - Optionally run remote commands when `allow_exec` is true (default **false**)
 
@@ -23,10 +23,11 @@ Desktop plugins and Python gateway plugins in Hermes run with **full trust** in 
 | Write path | Dry-run / unified diff before overwrite (Desktop confirm; API `dryRun`) |
 | Host header | Loopback check on plugin API routes |
 | Host keys | `known_hosts` + RejectPolicy when the file exists |
+| Secrets at rest | **Windows DPAPI (CurrentUser)** — `enc:dpapi:v1:…` in `deployments.json` |
 
 ## Known limitations
 
-1. **Credentials at rest are not encrypted.** Do not commit `deployments.json`. Prefer key auth without storing passphrases, or restrict OS file ACLs.
+1. **DPAPI is user-scoped, not machine-isolated.** Any process running as the same Windows account can decrypt. Non-Windows stores `plain:` prefixes. Never commit `deployments.json`.
 2. **In-process SSH (paramiko).** A compromised gateway process can use stored credentials. For higher isolation, keep secrets in a dedicated vault product and avoid long-lived passwords here.
 3. **No remote-source plugin loading.** Only install this package from a source you trust.
 

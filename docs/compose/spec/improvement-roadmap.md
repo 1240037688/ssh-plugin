@@ -41,7 +41,7 @@ commits: A1-A2-B1
 |---|------|------|------|
 | A1 | **Host 别名对外暴露** | Agent 工具与部分 REST 默认返回 `alias`（如 `srv_prod`），**不回传**真实 `host`/`username`；Desktop 编辑界面可显示完整信息给操作者 | `ssh_list_servers` / `/servers` 在 `maskHosts: true`（默认）时无明文 IP |
 | A2 | **写操作 Dry-Run / Diff** | `ssh_write_file` 与 Desktop 保存前：先 `read` 远端，生成 unified diff；需 `confirm` 或 `dryRun=true` 才真正写 | API：`POST /fs/write` 支持 `dryRun`；Desktop 显示 diff 对话框 |
-| A3 | **凭据落盘加密（P1）** | 对齐 vault 思路：DPAPI/系统钥匙串或调用 hermes-vault，避免明文 `deployments.json` | 磁盘无明文 password |
+| A3 | **凭据落盘加密** | 对齐 vault 思路：DPAPI/系统钥匙串或调用 hermes-vault，避免明文 `deployments.json` | 磁盘无明文 password |
 | A4 | **审计日志** | 记录 who/when/server/path/op（不含密钥），可选 `plugin-data/audit.jsonl` | 一次 write 可在审计文件查到 |
 
 #### B. 部署能力补全（P1，对标 PyCharm 更深）

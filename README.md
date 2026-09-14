@@ -80,7 +80,7 @@ See `skills/perf-loop/SKILL.md` for a staged prompt plan (P0–P6) used with ext
 
 Read [SECURITY.md](SECURITY.md). Highlights:
 
-- Credentials are stored **in plaintext** under plugin-data today — protect the OS account and backups
+- Credentials at rest are protected with **Windows DPAPI** (CurrentUser) in `deployments.json` (`enc:dpapi:v1:…`); same OS account can still decrypt — protect your login
 - Prefer key auth; set `allowedRemotePaths` and leave `allow_exec` off unless required
 - Desktop/API writes support dry-run + confirm
 

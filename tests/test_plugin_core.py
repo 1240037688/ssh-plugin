@@ -38,7 +38,9 @@ class TestStore(unittest.TestCase):
                 encoding="utf-8"
             )
         )
-        self.assertEqual(raw["servers"][0]["password"], "s3cret")
+        self.assertNotEqual(raw["servers"][0]["password"], "s3cret")
+        self.assertNotIn("s3cret", json.dumps(raw))
+        self.assertEqual(ds.get_server(s["id"])["password"], "s3cret")
 
     def test_public_masks_secret(self):
         s = ds.upsert_server(

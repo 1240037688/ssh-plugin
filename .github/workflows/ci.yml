@@ -24,7 +24,7 @@ jobs:
 
       - name: Byte-compile
         run: |
-          python -m py_compile deploy_paths.py security.py ssh_session.py sftp_client.py tools.py schemas.py __init__.py dashboard/plugin_api.py
+          python -m py_compile deploy_paths.py security.py secret_store.py ssh_session.py sftp_client.py tools.py schemas.py __init__.py dashboard/plugin_api.py
 
       - name: Setup Node
         uses: actions/setup-node@v4
