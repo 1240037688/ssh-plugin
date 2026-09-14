@@ -157,6 +157,7 @@ SSH_DOWNLOAD_TREE = {
             "localRoot": {"type": "string"},
             "dryRun": {"type": "boolean"},
             "maxFiles": {"type": "integer"},
+            "maxEntries": {"type": "integer", "description": "Walk visit cap; default 10000, maximum 20000"},
         },
         "required": ["server", "remoteRoot", "localRoot"],
     },

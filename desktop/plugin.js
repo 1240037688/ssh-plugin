@@ -1614,44 +1614,107 @@ function OperationsPanel({ t, selected }) {
     }
   }
 
+  function confirmSync() {
+    const plan = preview
+    setPreview(null)
+    if (!plan || plan.serverId !== $selectedId.get()) return
+    void ctxRest('/fs/sync', {
+      method: 'POST',
+      body: {
+        id: plan.serverId,
+        localRoot: plan.localRoot,
+        dryRun: false,
+        maxFiles: plan.count || 500,
+        expectedFiles: plan.files || []
+      }
+    })
+      .then(result => {
+        if (!result?.ok || result?.errors?.length) {
+          throw new Error(result?.error || result.errors.join('\n'))
+        }
+        notify('success', t('saved'))
+        void loadAudit()
+      })
+      .catch(e => notify('error', String(e?.message || e)))
+  }
+
   return jsxs('div', {
     className: 'border-b border-(--ui-stroke-secondary) px-3 py-1 text-xs',
     children: [
-      jsx(Button, { size: 'sm', variant: 'ghost', onClick: () => setOpen(!open), children: t('operations') }),
-      open ? jsxs('div', { className: 'flex flex-wrap items-start gap-2 py-2', children: [
-        jsx(Input, { className: 'max-w-sm', value: localRoot, placeholder: t('syncLocalRoot'),
-          onChange: e => setLocalRoot(e.target.value) }),
-        jsx(Button, { size: 'sm', disabled: !selected || busy, onClick: () => void previewUpload(),
-          children: t('previewSync') }),
-        jsx(Button, { size: 'sm', variant: 'outline', onClick: () => void loadAudit(),
-          children: t('auditRefresh') }),
-        audit ? jsx('div', { className: 'max-h-28 w-full overflow-auto text-(--ui-text-secondary)',
-          children: audit.length ? audit.map((e, i) => jsx('div', {
-            children: `${e.ts || ''} · ${e.op || ''} · ${e.serverName || e.serverId || ''} · ${e.ok ? '✓' : '×'} · ${e.path || ''}`
-          }, i)) : t('auditEmpty') }) : null
-      ] }) : null,
-      preview ? jsx(ConfirmDialog, {
-        open: true,
-        title: t('confirmSync'),
-        description: t('syncResult').replace('{count}', String(preview.count || 0)),
-        confirmLabel: t('syncNow'), cancelLabel: t('cancel'),
-        onCancel: () => setPreview(null),
-        onConfirm: () => {
-          const plan = preview
-          setPreview(null)
-          if (!plan || plan.serverId !== $selectedId.get()) return
-          void ctxRest('/fs/sync', { method: 'POST', body: {
-            id: plan.serverId, localRoot: plan.localRoot, dryRun: false,
-            maxFiles: plan.count || 500, expectedFiles: plan.files || []
-          } }).then(result => {
-            if (!result?.ok || result?.errors?.length) throw new Error(result?.error || result.errors.join('\n'))
-            notify('success', t('saved'))
-            void loadAudit()
-          }).catch(e => notify('error', String(e?.message || e)))
-        },
-        children: jsx('pre', { className: 'max-h-40 overflow-auto text-[0.6875rem]',
-          children: (preview.files || []).map(f => f.remotePath).join('\n').slice(0, 8000) })
-      }) : null
+      jsx(Button, {
+        size: 'sm',
+        variant: 'ghost',
+        onClick: () => setOpen(!open),
+        children: t('operations')
+      }),
+      open
+        ? jsxs('div', {
+            className: 'flex flex-wrap items-start gap-2 py-2',
+            children: [
+              jsx(Input, {
+                className: 'max-w-sm',
+                value: localRoot,
+                placeholder: t('syncLocalRoot'),
+                onChange: e => setLocalRoot(e.target.value)
+              }),
+              jsx(Button, {
+                size: 'sm',
+                disabled: !selected || busy,
+                onClick: () => void previewUpload(),
+                children: t('previewSync')
+              }),
+              jsx(Button, {
+                size: 'sm',
+                variant: 'outline',
+                onClick: () => void loadAudit(),
+                children: t('auditRefresh')
+              }),
+              audit
+                ? jsx('div', {
+                    className: 'max-h-28 w-full overflow-auto text-(--ui-text-secondary)',
+                    children: audit.length
+                      ? audit.map((entry, index) =>
+                          jsx(
+                            'div',
+                            {
+                              children:
+                                (entry.ts || '') +
+                                ' · ' +
+                                (entry.op || '') +
+                                ' · ' +
+                                (entry.serverName || entry.serverId || '') +
+                                ' · ' +
+                                (entry.ok ? '✓' : '×') +
+                                ' · ' +
+                                (entry.path || '')
+                            },
+                            index
+                          )
+                        )
+                      : t('auditEmpty')
+                  })
+                : null
+            ]
+          })
+        : null,
+      preview
+        ? jsx(ConfirmDialog, {
+            open: true,
+            title: t('confirmSync'),
+            description: t('syncResult').replace('{count}', String(preview.count || 0)),
+            confirmLabel: t('syncNow'),
+            cancelLabel: t('cancel'),
+            onCancel: () => setPreview(null),
+            onConfirm: () => void confirmSync(),
+            children: jsx('pre', {
+              className: 'max-h-40 overflow-auto text-[0.6875rem]',
+              children: (preview.files || [])
+                .map(f => f.remotePath)
+                .join('\n')
+                .slice(0, 8000)
+            })
+          })
+        : null
     ]
   })
 }

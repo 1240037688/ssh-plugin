@@ -245,6 +245,7 @@ class DownloadTreeIn(BaseModel):
     localRoot: str
     dryRun: bool = True
     maxFiles: int = 500
+    maxEntries: int = 10000
 
 
 @router.post("/fs/download-tree")
@@ -254,7 +255,7 @@ async def fs_download_tree(body: DownloadTreeIn) -> dict[str, Any]:
         from download_plan import download_tree
         result = await _ssh_call(
             download_tree, server, body.remoteRoot, body.localRoot,
-            dry_run=body.dryRun, max_files=body.maxFiles,
+            dry_run=body.dryRun, max_files=body.maxFiles, max_entries=body.maxEntries,
         )
         _audit("download_tree", server, result["remoteRoot"], dryRun=body.dryRun, count=result["count"])
         return result

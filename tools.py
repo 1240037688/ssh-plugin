@@ -284,10 +284,12 @@ def ssh_download_tree(args: dict, **kwargs) -> str:
             server, str(args.get("remoteRoot") or ""), str(args.get("localRoot") or ""),
             dry_run=True if args.get("dryRun") is None else bool(args["dryRun"]),
             max_files=int(args.get("maxFiles") or 500),
+            max_entries=int(args.get("maxEntries") or 10000),
         )
         _audit("download_tree", server, result["remoteRoot"], dryRun=result["dryRun"], count=result["count"])
         return _ok(result)
     except Exception as exc:
+        _audit("download_tree", locals().get("server"), str(args.get("remoteRoot") or ""), ok=False, error=str(exc)[:200])
         return _err(str(exc))
 
 

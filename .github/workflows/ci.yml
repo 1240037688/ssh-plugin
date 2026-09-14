@@ -35,7 +35,12 @@ jobs:
           node-version: "20"
 
       - name: Check Desktop plugin syntax
-        run: node --check desktop/plugin.js
+        # node --check treats .js as script and misses ESM parse errors
+        # (e.g. unbalanced parens). Copy to .mjs so Hermes-style module parse runs.
+        run: |
+          cp desktop/plugin.js /tmp/plugin.mjs
+          node --check /tmp/plugin.mjs
+          node --check desktop/plugin.js
 
   plugin-yaml:
     runs-on: ubuntu-latest
