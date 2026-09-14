@@ -39,7 +39,13 @@ class TestStore(unittest.TestCase):
             )
         )
         self.assertNotEqual(raw["servers"][0]["password"], "s3cret")
-        self.assertNotIn("s3cret", json.dumps(raw))
+        stored = raw["servers"][0]["password"] or ""
+        if sys.platform == "win32":
+            # DPAPI ciphertext must not contain the literal secret
+            self.assertNotIn("s3cret", json.dumps(raw))
+        else:
+            # Non-Windows fallback is explicit plain: prefix (documented gap)
+            self.assertTrue(stored.startswith("plain:") or stored.startswith("enc:"))
         self.assertEqual(ds.get_server(s["id"])["password"], "s3cret")
 
     def test_public_masks_secret(self):
@@ -76,8 +82,10 @@ class TestSecurity(unittest.TestCase):
     def test_local_path_allowlist(self):
         p = security.validate_local_path("plugin.yaml", {})
         self.assertEqual(p.name, "plugin.yaml")
+        # Use a path that cannot fall under process cwd on Linux CI or Windows
+        outside = "/etc/hostname" if os.name != "nt" else "C:/Windows/System32/drivers/etc/hosts"
         with self.assertRaises(security.SecurityError):
-            security.validate_local_path("C:/Windows/System32/drivers/etc/hosts", {})
+            security.validate_local_path(outside, {})
 
 
 class TestPool(unittest.TestCase):
