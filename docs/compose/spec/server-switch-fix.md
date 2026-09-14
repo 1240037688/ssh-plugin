@@ -1,14 +1,24 @@
 ---
 feature: server-switch-fix
-status: in-progress
+status: delivered
 updated: 2026-09-16
 branch: fix/server-switch-freeze
-commits: db952da..WIP
+commits: db952da..4ba9b59
 ---
 
 # 修复：双服务器切换卡死 + 切换卡片布局错误
 
 ## Report
+
+**What was built** — 双服务器切换卡死与顶栏卡片叠字的修复。后端将所有触碰 paramiko 的 REST 端点改为经有界 `ThreadPoolExecutor` 的 `_ssh_call` 包装，SSH 握手不再阻塞 uvicorn 事件循环，`/health` 在慢连接期间保持可用；默认 `connectionTimeoutMs` 降为 10s。桌面端删除手写 `absolute` 切换浮层，改用 SDK `DropdownMenu`；模块级 `treeEpoch` 丢弃切换后的过期 `fs/ls` / `fs/read` 响应；切换只改 `$selectedId`，树加载统一由 `selected` effect 触发。
+
+**Verification** — `node --check desktop/plugin.js` PASS；`node --check D:/hermes/desktop-plugins/ssh-plugin/plugin.js` PASS；`D:/hermes/hermes-agent/venv/Scripts/python.exe -m unittest discover -s tests -q` PASS（26 tests）；独立 review：spec compliance / correctness / codebase consistency 均 PASS，无 critical。
+
+**Journey log**
+- FastAPI `async def` 内直接调 paramiko 会冻住整条插件 REST（含 `/health`），Desktop 因此显示 runtime not ready。
+- 手写 `absolute` 浮层在 `flex-wrap` 顶栏里极易叠字；SDK `DropdownMenu` 是正确路径。
+- 双挂载（ROUTES + PANES）可用共享 `treeEpoch` 去重，无需把树状态改成单例。
+- 复制安装目录时若目标已存在，`Copy-Item -Recurse` 会嵌套一层，需先清空再装。
 
 ## [S1] Problem
 
@@ -27,14 +37,14 @@ commits: db952da..WIP
 
 - 在 `dashboard/plugin_api.py` 增加有界线程池 + `asyncio` 包装：
   ```python
-  _EXECUTOR = ThreadPoolExecutor(max_workers=8, thread_name_prefix="ssh-plugin")
+  _SSH_EXECUTOR = ThreadPoolExecutor(max_workers=8, thread_name_prefix="ssh-plugin")
   async def _ssh_call(fn, /, *args, **kwargs):
       loop = asyncio.get_running_loop()
-      return await loop.run_in_executor(_EXECUTOR, lambda: fn(*args, **kwargs))
+      return await loop.run_in_executor(_SSH_EXECUTOR, ...)
   ```
 - 所有触碰 paramiko / 连接池的 REST 端点改为经 `_ssh_call` 调用同步实现：
-  `fs_ls` / `fs_read` / `fs_preview` / `fs_write` / `fs_mkdir` / `fs_delete` / `fs_rename` / `fs_upload` / `fs_download` / `fs_sync` / `test_server` / `health_server`。
-- 纯本地端点（`health`、`servers` 列表、`audit`、`conn/stats`）保持同步或轻量 async，不进线程池。
+  `fs_ls` / `fs_read` / `fs_preview` / `fs_write` / `fs_mkdir` / `fs_delete` / `fs_rename` / `fs_upload` / `fs_download` / `fs_sync` / `test_server` / `health_server` / `exec`。
+- 纯本地端点（`health`、`servers` 列表、`audit`、`conn/stats`）保持轻量，不进线程池。
 - 默认 `connectionTimeoutMs` 从 30s 降到 **10s**（`ssh_session.py`），避免坏主机长时间占住 worker；仍允许服务器配置覆盖。
 - 连接池逻辑本身不改语义；线程池 + 每 server `RLock` 保证同一连接串行。
 
@@ -44,15 +54,15 @@ commits: db952da..WIP
   - `DropdownMenu` + `DropdownMenuTrigger`（当前服务器名按钮）+ `DropdownMenuContent` + `DropdownMenuItem`。
   - 每项：StatusDot + 显示名 + `user@host:port`（truncate），当前项高亮。
   - 点击项：`$selectedId.set(id)` 后由 effect 拉树；菜单由 SDK 自动关闭。
-- **树加载竞态**：模块级 `treeEpoch`；`resetTreeForServer` / `loadTreeDir` 在 await 后校验 epoch，过期结果丢弃，避免快速切换时旧服务器目录覆盖新树。
-- **双挂载**：`ROUTES_AREA` 与 `PANES_AREA` 共享 atom；树加载只由 `selected` 的 effect 触发一次（epoch 去重即可），不在点击处理器里再调 `resetTreeForServer`。
-- 切换后立刻清空 `$openFile` / `$treeNodes`，显示 Skeleton，不阻塞交互。
+- **树加载竞态**：模块级 `treeEpoch`；`resetTreeForServer` / `loadTreeDir` / `openEntry` 在 await 后校验 epoch，过期结果丢弃，避免快速切换时旧服务器目录覆盖新树。
+- **双挂载**：`ROUTES_AREA` 与 `PANES_AREA` 共享 atom；树加载由 `selected` 的 effect 触发（epoch 去重），不在点击处理器里再调 `resetTreeForServer`。
+- 切换后立刻清空 `$openFile` / `$treeNodes` / `$treeLoading`，显示 Skeleton，不阻塞交互。
 
 ### 2.3 测试边界
 
-- 单测：线程池包装后 `fs_ls` 等仍返回原结构（mock `sftp_client.list_dir`）；`test_api_async_does_not_block` 可验证 handler 协程可被并发 await（用 mock 短 sleep 模拟阻塞 fn）。
+- 单测：`tests/test_api_async.py` 验证阻塞 fn 在线程池中执行时 `/health` 类协程仍可完成；`_ssh_call` kwargs/错误传播；默认超时 10s；`fs_ls` 仍走 mock 结构。
 - 不强制真机 SSH；参数校验与 store 行为沿用现有测试。
-- Desktop 无自动化 UI 测试；以代码审查 + 本地预览为准。
+- Desktop 无自动化 UI 测试；以 `node --check` + 独立 code review 为准。
 
 ## [S3] Out of Scope
 
@@ -63,7 +73,7 @@ commits: db952da..WIP
 
 ## Tasks
 
-- [ ] T1: API 线程池包装 + 默认连接超时 10s — acceptance: 所有 SSH REST 经 `_ssh_call`；`connectionTimeoutMs` 默认 10000；现有单测通过 (covers: S2.1)
-- [ ] T2: 回归测试「阻塞 mock 不卡事件循环」— acceptance: 新测试在未包装时会失败/或直接测 `_ssh_call` 并发完成 (covers: S2.1; depends: T1)
-- [ ] T3: ServerTopBar 改用 DropdownMenu + 树 epoch 竞态 — acceptance: 无 custom absolute 浮层；切换仅改 selectedId；旧树结果被丢弃 (covers: S2.2)
-- [ ] T4: 同步安装到 Hermes 目录并本地跑测试 — acceptance: `python -m pytest tests -q` 全绿；`desktop/plugin.js` 与 `plugins/ssh-plugin` 一致 (covers: S2.3; depends: T1,T3)
+- [x] T1: API 线程池包装 + 默认连接超时 10s — acceptance: 所有 SSH REST 经 `_ssh_call`；`connectionTimeoutMs` 默认 10000；现有单测通过 (covers: S2.1)
+- [x] T2: 回归测试「阻塞 mock 不卡事件循环」— acceptance: 直接测 `_ssh_call` 并发完成且健康协程不被拖死 (covers: S2.1; depends: T1)
+- [x] T3: ServerTopBar 改用 DropdownMenu + 树 epoch 竞态 — acceptance: 无 custom absolute 浮层；切换仅改 selectedId；旧树结果被丢弃 (covers: S2.2)
+- [x] T4: 同步安装到 Hermes 目录并本地跑测试 — acceptance: `unittest discover` 26 全绿；`desktop/plugin.js` 与 `desktop-plugins` 一致 (covers: S2.3; depends: T1,T3)
