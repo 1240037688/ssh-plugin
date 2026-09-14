@@ -1620,7 +1620,7 @@ function OperationsPanel({ t, selected }) {
       jsx(Button, { size: 'sm', variant: 'ghost', onClick: () => setOpen(!open), children: t('operations') }),
       open ? jsxs('div', { className: 'flex flex-wrap items-start gap-2 py-2', children: [
         jsx(Input, { className: 'max-w-sm', value: localRoot, placeholder: t('syncLocalRoot'),
-          onChange: e => setLocalRoot(e.target.value }),
+          onChange: e => setLocalRoot(e.target.value) }),
         jsx(Button, { size: 'sm', disabled: !selected || busy, onClick: () => void previewUpload(),
           children: t('previewSync') }),
         jsx(Button, { size: 'sm', variant: 'outline', onClick: () => void loadAudit(),
