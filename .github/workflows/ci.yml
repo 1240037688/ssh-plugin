@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main, feature/**]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Unit tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Byte-compile
+        run: |
+          python -m py_compile deploy_paths.py security.py ssh_session.py sftp_client.py tools.py schemas.py __init__.py dashboard/plugin_api.py
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Check Desktop plugin syntax
+        run: node --check desktop/plugin.js
+
+  plugin-yaml:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ensure plugin.yaml exists
+        run: test -f plugin.yaml && test -f dashboard/manifest.json && test -f desktop/plugin.js

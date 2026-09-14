@@ -1,34 +1,60 @@
 # ssh-plugin — Hermes SSH Deploy
 
-统一包插件：可视化 SSH/SFTP 文件管理 + PyCharm Deployment 风格配置。
+[![CI](https://github.com/OWNER/ssh-plugin/actions/workflows/ci.yml/badge.svg)](../../actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-## 功能
+Hermes **unified package** plugin: visual SSH/SFTP file manager (PyCharm-style mappings) + keep-alive sessions + Agent tools.
 
-- **Desktop**：路由 `/ssh-deploy`（侧栏「SSH 部署」）。服务器列表、远程目录浏览、新建/删除/重命名、文本编辑保存、图片预览、连接测试、Mappings/Exclusions。
-- **Backend**：`dashboard/plugin_api.py` 挂载到 `/api/plugins/ssh-plugin/`。
-- **Agent 工具**：`ssh_list_servers` / `ssh_health` / `ssh_ls` / `ssh_read_file` / `ssh_write_file` / `ssh_mkdir` / `ssh_delete` / `ssh_upload` / `ssh_download` / `ssh_exec`。
+> Replace `OWNER/ssh-plugin` in the badge after you push the repository.
 
-## 规范对照（hermes-vault）
+## Features
 
-参考仓库只读克隆于 `E:\hermes_plugin\refs\hermes-vault`（勿装进 Hermes）。已对齐：
+| Surface | What you get |
+|---------|----------------|
+| **Desktop** | Route `/ssh-deploy`（侧栏 SSH 部署）：服务器列表、远程树、编辑器、图片预览、连接测试、Mappings/Exclusions、**写前 Diff 确认** |
+| **Backend** | FastAPI router at `/api/plugins/ssh-plugin/` |
+| **Agent tools** | `ssh_list_servers` `ssh_health` `ssh_ls` `ssh_read_file` `ssh_write_file` `ssh_map_path` `ssh_mkdir` `ssh_delete` `ssh_upload` `ssh_download` `ssh_exec` |
+| **Security** | Secret masking, host mask for agents, path allowlists, command whitelist, dry-run writes |
 
-- `dashboard/manifest.json` 含 `label/description/icon/version/api`
-- `plugin_api.py` 安全模型说明 + Host 头 loopback 校验
-- Desktop 删除 `window.confirm`，改用 SDK `ConfirmDialog`
-- `python_dependencies: paramiko>=3.0.0`
-- `tests/test_plugin_core.py` 离线单测
+## Layout
 
-仍保留的差异：凭据明文 `deployments.json`（未接 vault 加密）；统一包而非 desktop/secret 拆仓。
-
-## 安装（开发机）
-
-1. 复制本目录到 Hermes 插件根（本机 `HERMES_HOME` 为 `D:\hermes`，经 Junction 也映射为 `%LOCALAPPDATA%\hermes`）：
-
-```powershell
-Copy-Item -Recurse -Force E:\hermes_plugin\ssh\ssh-plugin D:\hermes\plugins\ssh-plugin
+```text
+ssh-plugin/
+├── plugin.yaml                 # agent manifest + python_dependencies
+├── __init__.py                 # register tools + skills
+├── schemas.py / tools.py
+├── deployment_store.py         # servers / mappings (local data dir)
+├── deploy_paths.py             # host mask + mapping + unified diff
+├── security.py / ssh_session.py / sftp_client.py
+├── dashboard/
+│   ├── manifest.json
+│   └── plugin_api.py           # REST for Desktop
+├── desktop/plugin.js           # Hermes Desktop UI (no JSX build step)
+├── skills/perf-loop/SKILL.md
+├── preview/                    # offline UI mock (browser)
+├── tests/                      # offline unit tests
+└── docs/compose/spec/          # design notes
 ```
 
-2. 在 **`D:\hermes\config.yaml`**（不要改插件仓库里的文件）启用 Python 半边：
+## Install
+
+1. **Dependencies** (Hermes does **not** auto-install):
+
+```bash
+python -m pip install "paramiko>=3.0.0"
+```
+
+2. **Copy package** into Hermes plugin root:
+
+```bash
+# Linux / macOS
+cp -R . "$HOME/.hermes/plugins/ssh-plugin"
+
+# Windows (PowerShell) — use your real HERMES_HOME
+Copy-Item -Recurse -Force . "$env:USERPROFILE\.hermes\plugins\ssh-plugin"
+```
+
+3. **Enable Python half** in `$HERMES_HOME/config.yaml`:
 
 ```yaml
 plugins:
@@ -36,33 +62,46 @@ plugins:
     - ssh-plugin
 ```
 
-3. 重启 Hermes gateway。Desktop 侧在 **Capabilities → Plugins** 打开 `ssh-plugin`（统一包默认关闭）。
+4. **Restart** Hermes gateway / Desktop. Enable **Capabilities → Plugins → ssh-plugin** (unified packages ship opt-in).
 
-4. 依赖：gateway 环境需 `paramiko>=3.0.0`（已在 `plugin.yaml` 的 `python_dependencies` 声明；Hermes **只提示、不自动 pip 安装**）：
+5. Configure servers in **SSH 部署** UI. Secrets stay under `$HERMES_HOME/plugin-data/ssh-plugin/` — **never commit** that file.
 
-```powershell
-# 使用 Hermes 实际 venv / 解释器
-python -m pip install "paramiko>=3.0.0"
+## Agent tools (summary)
+
+- `ssh_list_servers` — host/username **masked** by default (`unmask: true` to reveal, still no passwords)
+- `ssh_write_file` — set `dryRun: true` to get a unified diff first
+- `ssh_map_path` — PyCharm-style local ↔ remote mapping
+- `ssh_upload` — optional `remotePath` (auto-mapped from local when omitted)
+- `ssh_exec` — only if `allow_exec`; prefer `commandWhitelist`
+
+See `skills/perf-loop/SKILL.md` for a staged prompt plan (P0–P6) used with external performance plugins.
+
+## Security
+
+Read [SECURITY.md](SECURITY.md). Highlights:
+
+- Credentials are stored **in plaintext** under plugin-data today — protect the OS account and backups
+- Prefer key auth; set `allowedRemotePaths` and leave `allow_exec` off unless required
+- Desktop/API writes support dry-run + confirm
+
+## Development
+
+```bash
+node --check desktop/plugin.js
+python -m unittest discover -s tests -v
 ```
 
-## 安全策略（对齐 ssh-mcp-server）
+Contributions: [CONTRIBUTING.md](CONTRIBUTING.md).
 
-| 字段 | 作用 |
-|------|------|
-| `allowedRemotePaths` | SFTP 远程路径前缀白名单；空 = 全盘，并在 `/servers` 返回 `securityWarnings` |
-| `allowedLocalPaths` | Agent `ssh_upload`/`ssh_download` 本地路径限制（默认额外允许进程 cwd） |
-| `commandWhitelist` | `ssh_exec` 全匹配白名单；开启后禁止 `; & | \` < > $()` 与换行 |
-| `commandBlacklist` | 命令黑名单 |
-| `allow_exec` | 默认 **false** |
+## Browser preview (no Hermes)
 
-## 配置数据
+Open `preview/index.html` for an offline mock of the three-pane UI (mock filesystem only).
 
-`~/.hermes/plugin-data/ssh-plugin/deployments.json`（由 UI 写入，含密码/私钥路径，勿提交 git）。
+## Related
 
-## 浏览器预览（无 Hermes）
+- Hermes Desktop Plugin SDK (official docs)
+- Design references used while building: `hermes-vault` (structure/security model), `ssh-mcp-server` (command/path policy ideas)
 
-打开 `preview/index.html` 可离线体验 UI（mock 文件系统，不连真实 SSH）。
+## License
 
-## 开发源
-
-本仓库为开发根：`E:\hermes_plugin\ssh\ssh-plugin`。设计见 `docs/compose/spec/ssh-deploy.md`。参考能力来源：`../ssh-mcp-server`（只读）。
+[MIT](LICENSE)
