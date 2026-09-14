@@ -41,8 +41,11 @@ def record(
     ok: bool = True,
     source: str = "plugin",
     detail: dict[str, Any] | None = None,
+    **extra: Any,
 ) -> None:
     """Best-effort append one audit line. Never raises to callers."""
+    merged = dict(detail or {})
+    merged.update(extra or {})
     entry = {
         "ts": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime()) + f".{int(time.time() * 1000) % 1000:03d}",
         "op": op,
@@ -51,7 +54,7 @@ def record(
         "path": path,
         "ok": bool(ok),
         "source": source,
-        "detail": _sanitize(detail),
+        "detail": _sanitize(merged),
     }
     line = json.dumps(entry, ensure_ascii=False)
     try:
