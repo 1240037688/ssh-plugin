@@ -1,4 +1,12 @@
 {
   "name": "ssh-plugin",
-  "api": "plugin_api.py"
+  "label": "SSH Deploy",
+  "description": "Visual SSH/SFTP file manager and deployment helpers with keep-alive sessions for Hermes agents.",
+  "icon": "Remote",
+  "version": "0.1.0",
+  "api": "plugin_api.py",
+  "tab": {
+    "path": "/ssh-deploy",
+    "hidden": true
+  }
 }

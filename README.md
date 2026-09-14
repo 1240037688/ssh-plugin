@@ -8,6 +8,18 @@
 - **Backend**：`dashboard/plugin_api.py` 挂载到 `/api/plugins/ssh-plugin/`。
 - **Agent 工具**：`ssh_list_servers` / `ssh_health` / `ssh_ls` / `ssh_read_file` / `ssh_write_file` / `ssh_mkdir` / `ssh_delete` / `ssh_upload` / `ssh_download` / `ssh_exec`。
 
+## 规范对照（hermes-vault）
+
+参考仓库只读克隆于 `E:\hermes_plugin\refs\hermes-vault`（勿装进 Hermes）。已对齐：
+
+- `dashboard/manifest.json` 含 `label/description/icon/version/api`
+- `plugin_api.py` 安全模型说明 + Host 头 loopback 校验
+- Desktop 删除 `window.confirm`，改用 SDK `ConfirmDialog`
+- `python_dependencies: paramiko>=3.0.0`
+- `tests/test_plugin_core.py` 离线单测
+
+仍保留的差异：凭据明文 `deployments.json`（未接 vault 加密）；统一包而非 desktop/secret 拆仓。
+
 ## 安装（开发机）
 
 1. 复制本目录到 Hermes 插件根（本机 `HERMES_HOME` 为 `D:\hermes`，经 Junction 也映射为 `%LOCALAPPDATA%\hermes`）：

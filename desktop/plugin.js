@@ -26,6 +26,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  ConfirmDialog,
   icons,
   PANES_AREA,
   ROUTES_AREA,
@@ -524,6 +525,7 @@ function FileTree({ t }) {
   const err = useValue($listError)
   const path = useValue($openFile)?.path
   const [prompt, setPrompt] = useState(null) // { kind: 'file'|'folder'|'path' }
+  const [confirmDelete, setConfirmDelete] = useState(null) // entry to delete
 
   return jsxs('div', {
     className: 'flex h-full min-w-0 flex-1 flex-col',
@@ -672,22 +674,7 @@ function FileTree({ t }) {
                               className: 'h-6 px-1 opacity-70',
                               onClick: ev => {
                                 ev?.stopPropagation?.()
-                                void (async () => {
-                                  const id = $selectedId.get()
-                                  if (!id) return
-                                  if (!window.confirm(t('confirmDeleteFile') + '\n' + e.path)) return
-                                  try {
-                                    await ctxRest('/fs/delete', {
-                                      method: 'POST',
-                                      body: { id, path: e.path, recursive: e.type === 'dir' }
-                                    })
-                                    notify('success', t('deleted'))
-                                    if ($openFile.get()?.path === e.path) $openFile.set(null)
-                                    await loadList()
-                                  } catch (err2) {
-                                    notify('error', String(err2?.message || err2))
-                                  }
-                                })()
+                                setConfirmDelete(e)
                               },
                               children: '×'
                             })
@@ -703,6 +690,33 @@ function FileTree({ t }) {
             t,
             mode: prompt.kind,
             onClose: () => setPrompt(null)
+          })
+        : null,
+      confirmDelete
+        ? jsx(ConfirmDialog, {
+            open: true,
+            title: t('confirmDeleteFile'),
+            description: confirmDelete.path,
+            confirmLabel: t('delete'),
+            cancelLabel: t('cancel'),
+            onConfirm: async () => {
+              const id = $selectedId.get()
+              const target = confirmDelete
+              setConfirmDelete(null)
+              if (!id || !target) return
+              try {
+                await ctxRest('/fs/delete', {
+                  method: 'POST',
+                  body: { id, path: target.path, recursive: target.type === 'dir' }
+                })
+                notify('success', t('deleted'))
+                if ($openFile.get()?.path === target.path) $openFile.set(null)
+                await loadList()
+              } catch (err2) {
+                notify('error', String(err2?.message || err2))
+              }
+            },
+            onCancel: () => setConfirmDelete(null)
           })
         : null
     ]

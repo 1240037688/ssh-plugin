@@ -1,14 +1,25 @@
-"""FastAPI router mounted at /api/plugins/ssh-plugin/ by Hermes dashboard bridge."""
+"""Hermes SSH Deploy backend adapter (mounted at /api/plugins/ssh-plugin/).
+
+Security model (aligned with hermes-vault desktop adapter conventions):
+- Secrets never appear in REST list/upsert responses (masked ``***``).
+- Remote paths are canonicalized; ``..`` / NUL rejected; optional
+  ``allowedRemotePaths`` prefix allowlist.
+- Local upload/download paths constrained by ``allowedLocalPaths`` + process cwd.
+- ``ssh_exec`` gated by ``allow_exec`` + optional command whitelist/blacklist.
+- Host header must be loopback unless the app records an explicit bound host
+  (DNS-rebinding / R1 hardening, same idea as hermes-vault-desktop).
+- Failures return structured HTTP errors; connection ops surface backend detail
+  without echoing credentials.
+"""
 
 from __future__ import annotations
 
 import base64
-from typing import Any
-
 import sys
 from pathlib import Path
+from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 _ROOT = Path(__file__).resolve().parent.parent
@@ -23,7 +34,37 @@ try:
 except ImportError:
     from ..security import security_warnings  # type: ignore
 
-router = APIRouter()
+LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "[::1]"})
+
+
+def _host_only(host_header: str) -> str:
+    h = (host_header or "").strip()
+    if h.startswith("["):
+        close = h.find("]")
+        if close != -1:
+            return h[1:close].lower()
+        return h.strip("[]").lower()
+    if ":" in h:
+        return h.rsplit(":", 1)[0].lower()
+    return h.lower()
+
+
+def _validate_host_header(request: Request) -> None:
+    host = request.headers.get("host", "")
+    if not host:
+        return
+    if _host_only(host) in LOOPBACK_HOSTS:
+        return
+    bound_host = getattr(request.app.state, "bound_host", None)
+    if bound_host and _host_only(host) == _host_only(str(bound_host)):
+        return
+    # Wildcard binds are operator opt-in; skip host-layer reject to match host app.
+    if bound_host in ("0.0.0.0", "::", "[::]"):
+        return
+    raise HTTPException(status_code=400, detail="invalid Host header")
+
+
+router = APIRouter(dependencies=[Depends(_validate_host_header)])
 
 
 def _server_or_404(server_id: str) -> dict[str, Any]:
