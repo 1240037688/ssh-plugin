@@ -1,14 +1,23 @@
 ---
 feature: plugin-compliance
-status: designed
+status: delivered
 updated: 2026-09-14
 branch: feature/ssh-deploy
-commits: pending
+commits: 93fbe0c
 ---
 
 # 对照 hermes-vault 的规范审计与缺口修复
 
 ## Report
+
+**What was built** — 克隆 `hermes-vault` 至 `E:\hermes_plugin\refs\hermes-vault` 作只读样板；对齐 manifest 字段、plugin_api 安全说明与 Host 校验、ConfirmDialog、离线 tests（7/7 PASS）。加密 vault / 子进程 bridge 记为 P1。
+
+**Verification** — node --check / py_compile / unittest 全 PASS。
+
+**Journey log**
+- vault 拆 desktop 与 secret-source；我们保持统一包。
+- vault 用子进程 bridge；我们 in-process paramiko。
+- 参考仓勿装进 HERMES_HOME/plugins。
 
 ## [S1] Problem
 
@@ -64,7 +73,7 @@ commits: pending
 
 ## Tasks
 
-- [ ] T1: 写本审计 Spec — acceptance: 需求整理 + 差距表完整 (covers: S1/S2)
-- [ ] T2: 修 P0 代码/manifest/README — acceptance: 文件变更可编译 (covers: S2)
-- [ ] T3: tests + 跑通 — acceptance: pytest 或 _test 脚本 PASS (covers: S2)
-- [ ] T4: 同步 D:\hermes\plugins 并 commit — acceptance: git 提交 (covers: S2)
+- [x] T1: 写本审计 Spec — acceptance: 需求整理 + 差距表完整 (covers: S1/S2)
+- [x] T2: 修 P0 代码/manifest/README — acceptance: 文件变更可编译 (covers: S2)
+- [x] T3: tests + 跑通 — acceptance: pytest 或 _test 脚本 PASS (covers: S2)
+- [x] T4: 同步 D:\hermes\plugins 并 commit — acceptance: git 提交 (covers: S2)
