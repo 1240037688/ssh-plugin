@@ -47,6 +47,9 @@ def _normalize_server(raw: dict[str, Any]) -> dict[str, Any]:
         "mappings": [],
         "exclusions": [],
         "allowedRemotePaths": [],
+        "allowedLocalPaths": [],
+        "commandWhitelist": [],
+        "commandBlacklist": [],
         "allow_exec": bool(raw.get("allow_exec") or raw.get("allowExec") or False),
     }
     for m in raw.get("mappings") or []:
@@ -56,14 +59,11 @@ def _normalize_server(raw: dict[str, Any]) -> dict[str, Any]:
         remote = str(m.get("remoteRoot") or "").strip()
         if local and remote:
             server["mappings"].append({"localRoot": local, "remoteRoot": remote})
-    for e in raw.get("exclusions") or []:
-        s = str(e).strip()
-        if s:
-            server["exclusions"].append(s)
-    for p in raw.get("allowedRemotePaths") or []:
-        s = str(p).strip()
-        if s:
-            server["allowedRemotePaths"].append(s)
+    for key in ("exclusions", "allowedRemotePaths", "allowedLocalPaths", "commandWhitelist", "commandBlacklist"):
+        for item in raw.get(key) or []:
+            s = str(item).strip()
+            if s:
+                server[key].append(s)
     return server
 
 

@@ -10,13 +10,13 @@
 
 ## 安装（开发机）
 
-1. 复制本目录到 Hermes 插件根：
+1. 复制本目录到 Hermes 插件根（本机 `HERMES_HOME` 为 `D:\hermes`，经 Junction 也映射为 `%LOCALAPPDATA%\hermes`）：
 
 ```powershell
-Copy-Item -Recurse -Force E:\hermes_plugin\ssh\ssh-plugin $env:USERPROFILE\.hermes\plugins\ssh-plugin
+Copy-Item -Recurse -Force E:\hermes_plugin\ssh\ssh-plugin D:\hermes\plugins\ssh-plugin
 ```
 
-2. 在 `~/.hermes/config.yaml` 启用 Python 半边：
+2. 在 **`D:\hermes\config.yaml`**（不要改插件仓库里的文件）启用 Python 半边：
 
 ```yaml
 plugins:
@@ -26,12 +26,17 @@ plugins:
 
 3. 重启 Hermes gateway。Desktop 侧在 **Capabilities → Plugins** 打开 `ssh-plugin`（统一包默认关闭）。
 
-4. 依赖：gateway 环境需 `paramiko`：
+4. 依赖：gateway 环境需 `paramiko`。
 
-```powershell
-# 使用 Hermes 自带 venv 时
-& "$env:LOCALAPPDATA\hermes\hermes-agent\venv\Scripts\python.exe" -m pip install paramiko
-```
+## 安全策略（对齐 ssh-mcp-server）
+
+| 字段 | 作用 |
+|------|------|
+| `allowedRemotePaths` | SFTP 远程路径前缀白名单；空 = 全盘，并在 `/servers` 返回 `securityWarnings` |
+| `allowedLocalPaths` | Agent `ssh_upload`/`ssh_download` 本地路径限制（默认额外允许进程 cwd） |
+| `commandWhitelist` | `ssh_exec` 全匹配白名单；开启后禁止 `; & | \` < > $()` 与换行 |
+| `commandBlacklist` | 命令黑名单 |
+| `allow_exec` | 默认 **false** |
 
 ## 配置数据
 

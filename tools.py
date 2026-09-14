@@ -3,15 +3,15 @@
 from __future__ import annotations
 
 import json
-import shutil
-from pathlib import Path
 from typing import Any
 
 try:
     from . import deployment_store, sftp_client
+    from .security import validate_local_path
 except ImportError:
     import deployment_store  # type: ignore
     import sftp_client  # type: ignore
+    from security import validate_local_path  # type: ignore
 
 
 def _ok(payload: dict[str, Any]) -> str:
@@ -114,7 +114,7 @@ def ssh_upload(args: dict, **kwargs) -> str:
     del kwargs
     try:
         server = _resolve_server(str(args.get("server") or ""))
-        local = Path(str(args.get("localPath") or "")).expanduser()
+        local = validate_local_path(str(args.get("localPath") or ""), server)
         if not local.is_file():
             return _err(f"local file not found: {local}")
         path = deployment_store.safe_remote_path(
@@ -132,7 +132,7 @@ def ssh_download(args: dict, **kwargs) -> str:
         path = deployment_store.safe_remote_path(
             str(args.get("remotePath") or ""), server.get("allowedRemotePaths") or None
         )
-        local = Path(str(args.get("localPath") or "")).expanduser()
+        local = validate_local_path(str(args.get("localPath") or ""), server)
         local.parent.mkdir(parents=True, exist_ok=True)
         data = sftp_client.download_bytes(server, path)
         local.write_bytes(data)
@@ -146,8 +146,6 @@ def ssh_exec(args: dict, **kwargs) -> str:
     try:
         server = _resolve_server(str(args.get("server") or ""))
         command = str(args.get("command") or "").strip()
-        if not command:
-            return _err("command is required")
         timeout = int(args.get("timeout") or 30)
         return _ok(sftp_client.exec_command(server, command, timeout=timeout))
     except Exception as exc:

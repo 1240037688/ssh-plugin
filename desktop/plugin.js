@@ -89,6 +89,9 @@ const LOCALES = {
     mappings: '路径映射 (local ↔ remote)',
     exclusions: '排除模式 (glob, 每行一条)',
     allowedPaths: '允许的远程路径前缀 (可选)',
+    allowedLocal: '允许的本地路径 (上传/下载, 可选, 每行一条)',
+    whitelist: '命令白名单正则 (每行一条, 全匹配)',
+    blacklist: '命令黑名单正则 (每行一条)',
     allowExec: '允许 ssh_exec 命令',
     connection: '连接',
     mappingTab: '映射 / 排除',
@@ -169,6 +172,9 @@ const LOCALES = {
     mappings: 'Mappings (local ↔ remote)',
     exclusions: 'Exclusions (one glob per line)',
     allowedPaths: 'Allowed remote prefixes (optional)',
+    allowedLocal: 'Allowed local paths for upload/download (optional, one per line)',
+    whitelist: 'Command whitelist regexes (one per line, full match)',
+    blacklist: 'Command blacklist regexes (one per line)',
     allowExec: 'Allow ssh_exec',
     connection: 'Connection',
     mappingTab: 'Mappings / Excluded',
@@ -866,7 +872,10 @@ function ServerDialog({ t, server, onClose, onSaved }) {
     allow_exec: !!server?.allow_exec,
     mappings: (server?.mappings || []).map(m => ({ ...m })),
     exclusionsText: (server?.exclusions || []).join('\n'),
-    allowedText: (server?.allowedRemotePaths || []).join('\n')
+    allowedText: (server?.allowedRemotePaths || []).join('\n'),
+    allowedLocalText: (server?.allowedLocalPaths || []).join('\n'),
+    whitelistText: (server?.commandWhitelist || []).join('\n'),
+    blacklistText: (server?.commandBlacklist || []).join('\n')
   }))
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
@@ -1109,6 +1118,39 @@ function ServerDialog({ t, server, onClose, onSaved }) {
                       onChange: e => set('allowedText', e.target.value)
                     })
                   ]
+                }),
+                jsxs('label', {
+                  className: 'grid gap-1 text-xs',
+                  children: [
+                    t('allowedLocal'),
+                    jsx(Textarea, {
+                      rows: 2,
+                      value: form.allowedLocalText,
+                      onChange: e => set('allowedLocalText', e.target.value)
+                    })
+                  ]
+                }),
+                jsxs('label', {
+                  className: 'grid gap-1 text-xs',
+                  children: [
+                    t('whitelist'),
+                    jsx(Textarea, {
+                      rows: 3,
+                      value: form.whitelistText,
+                      onChange: e => set('whitelistText', e.target.value)
+                    })
+                  ]
+                }),
+                jsxs('label', {
+                  className: 'grid gap-1 text-xs',
+                  children: [
+                    t('blacklist'),
+                    jsx(Textarea, {
+                      rows: 2,
+                      value: form.blacklistText,
+                      onChange: e => set('blacklistText', e.target.value)
+                    })
+                  ]
                 })
               ]
             }),
@@ -1133,7 +1175,10 @@ function ServerDialog({ t, server, onClose, onSaved }) {
                       allow_exec: !!form.allow_exec,
                       mappings: form.mappings.filter(m => m.localRoot && m.remoteRoot),
                       exclusions: form.exclusionsText.split('\n').map(s => s.trim()).filter(Boolean),
-                      allowedRemotePaths: form.allowedText.split('\n').map(s => s.trim()).filter(Boolean)
+                      allowedRemotePaths: form.allowedText.split('\n').map(s => s.trim()).filter(Boolean),
+                      allowedLocalPaths: form.allowedLocalText.split('\n').map(s => s.trim()).filter(Boolean),
+                      commandWhitelist: form.whitelistText.split('\n').map(s => s.trim()).filter(Boolean),
+                      commandBlacklist: form.blacklistText.split('\n').map(s => s.trim()).filter(Boolean)
                     }
                     await ctxRest('/servers', { method: 'POST', body })
                     notify('success', t('saved'))

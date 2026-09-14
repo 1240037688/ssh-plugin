@@ -18,6 +18,11 @@ if str(_ROOT) not in sys.path:
 import deployment_store  # noqa: E402
 import sftp_client  # noqa: E402
 
+try:
+    from security import security_warnings
+except ImportError:
+    from ..security import security_warnings  # type: ignore
+
 router = APIRouter()
 
 
@@ -52,6 +57,9 @@ class ServerIn(BaseModel):
     mappings: list[dict[str, Any]] = Field(default_factory=list)
     exclusions: list[str] = Field(default_factory=list)
     allowedRemotePaths: list[str] = Field(default_factory=list)
+    allowedLocalPaths: list[str] = Field(default_factory=list)
+    commandWhitelist: list[str] = Field(default_factory=list)
+    commandBlacklist: list[str] = Field(default_factory=list)
     allow_exec: bool = False
 
 
@@ -118,7 +126,13 @@ async def health() -> dict[str, Any]:
 
 @router.get("/servers")
 async def servers() -> dict[str, Any]:
-    return {"servers": deployment_store.list_servers(), "defaultServerId": deployment_store.load().get("defaultServerId")}
+    listed = deployment_store.list_servers()
+    # Attach non-secret security gap notes (computed from stored policy fields).
+    full = {s["id"]: s for s in deployment_store.load()["servers"]}
+    for item in listed:
+        raw = full.get(item["id"]) or item
+        item["securityWarnings"] = security_warnings(raw)
+    return {"servers": listed, "defaultServerId": deployment_store.load().get("defaultServerId")}
 
 
 @router.post("/servers")

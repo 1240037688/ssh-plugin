@@ -72,7 +72,10 @@ SSH_DELETE = {
 
 SSH_UPLOAD = {
     "name": "ssh_upload",
-    "description": "Upload a local file to a remote path over SFTP.",
+    "description": (
+        "Upload a local file to a remote path over SFTP. "
+        "Local path must stay under process cwd or the server's allowedLocalPaths."
+    ),
     "parameters": {
         "type": "object",
         "properties": {
@@ -86,7 +89,10 @@ SSH_UPLOAD = {
 
 SSH_DOWNLOAD = {
     "name": "ssh_download",
-    "description": "Download a remote file to a local path over SFTP.",
+    "description": (
+        "Download a remote file to a local path over SFTP. "
+        "Local path must stay under process cwd or the server's allowedLocalPaths."
+    ),
     "parameters": {
         "type": "object",
         "properties": {
@@ -100,7 +106,12 @@ SSH_DOWNLOAD = {
 
 SSH_EXEC = {
     "name": "ssh_exec",
-    "description": "Run a shell command on a remote server. Only works when the server has allow_exec enabled.",
+    "description": (
+        "Run a shell command on a remote server. "
+        "Requires allow_exec. When commandWhitelist is set, the full command must match "
+        "and may not contain shell control characters (; & | ` < > $() or newlines). "
+        "commandBlacklist rejects matching commands."
+    ),
     "parameters": {
         "type": "object",
         "properties": {

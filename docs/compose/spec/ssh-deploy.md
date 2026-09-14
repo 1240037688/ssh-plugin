@@ -149,9 +149,11 @@ Handler 签名 `def f(args: dict, **kwargs) -> str`，始终返回 JSON 字符�
 ### 安全边界
 
 - 密钥/密码仅在 gateway 进程内使用；REST 响应剥离 secret
-- 默认 `allow_exec: false`，Agent 不暴露任意 shell，除非用户显式打开
-- SFTP 路径 canonicalize；可选 `allowedRemotePaths` 白名单
+- 默认 `allow_exec: false`；开启后可选 `commandWhitelist`/`commandBlacklist`（全匹配 + 禁 shell 控制符，语义对齐 ssh-mcp-server）
+- `allowedLocalPaths` 约束 Agent 本地上传/下载（默认含进程 cwd）
+- SFTP 路径 canonicalize；可选 `allowedRemotePaths` 白名单；空配置在 `/servers` 返回 `securityWarnings`
 - 上传大小上限（默认 20MB preview / 50MB write）
+- 主机密钥：存在 `~/.ssh/known_hosts` 时 `RejectPolicy`
 
 ### 验证边界
 

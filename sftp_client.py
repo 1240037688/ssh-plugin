@@ -294,14 +294,18 @@ def delete(server: dict[str, Any], path: str, recursive: bool = False) -> dict[s
 
 
 def exec_command(server: dict[str, Any], command: str, timeout: int = 30) -> dict[str, Any]:
-    if not server.get("allow_exec"):
-        raise SftpError("ssh_exec is disabled for this server (set allow_exec true)")
+    try:
+        from .security import validate_command
+    except ImportError:
+        from security import validate_command  # type: ignore
+
+    cmd = validate_command(server, command)
     with RemoteSession(session_server(server)) as sess:
-        stdin, stdout, stderr = sess.client.exec_command(command, timeout=timeout)
+        stdin, stdout, stderr = sess.client.exec_command(cmd, timeout=timeout)
         out = stdout.read().decode("utf-8", errors="replace")
         err = stderr.read().decode("utf-8", errors="replace")
         code = stdout.channel.recv_exit_status()
-        return {"command": command, "exitCode": code, "stdout": out[-100000:], "stderr": err[-100000:]}
+        return {"command": cmd, "exitCode": code, "stdout": out[-100000:], "stderr": err[-100000:]}
 
 
 def _ensure_parent(sftp, path: str) -> None:
