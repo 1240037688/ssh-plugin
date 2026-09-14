@@ -5,6 +5,9 @@ manifest_version: 2
 api_version: 1
 license: MIT
 tags: [ssh, sftp, deployment, files, desktop]
+# Hermes surfaces missing deps as install guidance; it does not auto-pip-install.
+python_dependencies:
+  - "paramiko>=3.0.0"
 provides_tools:
   - ssh_list_servers
   - ssh_health

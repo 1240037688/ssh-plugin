@@ -6,7 +6,7 @@
 
 - **Desktop**：路由 `/ssh-deploy`（侧栏「SSH 部署」）。服务器列表、远程目录浏览、新建/删除/重命名、文本编辑保存、图片预览、连接测试、Mappings/Exclusions。
 - **Backend**：`dashboard/plugin_api.py` 挂载到 `/api/plugins/ssh-plugin/`。
-- **Agent 工具**：`ssh_list_servers` / `ssh_ls` / `ssh_read_file` / `ssh_write_file` / `ssh_mkdir` / `ssh_delete` / `ssh_upload` / `ssh_download` / `ssh_exec`。
+- **Agent 工具**：`ssh_list_servers` / `ssh_health` / `ssh_ls` / `ssh_read_file` / `ssh_write_file` / `ssh_mkdir` / `ssh_delete` / `ssh_upload` / `ssh_download` / `ssh_exec`。
 
 ## 安装（开发机）
 
@@ -26,7 +26,12 @@ plugins:
 
 3. 重启 Hermes gateway。Desktop 侧在 **Capabilities → Plugins** 打开 `ssh-plugin`（统一包默认关闭）。
 
-4. 依赖：gateway 环境需 `paramiko`。
+4. 依赖：gateway 环境需 `paramiko>=3.0.0`（已在 `plugin.yaml` 的 `python_dependencies` 声明；Hermes **只提示、不自动 pip 安装**）：
+
+```powershell
+# 使用 Hermes 实际 venv / 解释器
+python -m pip install "paramiko>=3.0.0"
+```
 
 ## 安全策略（对齐 ssh-mcp-server）
 
