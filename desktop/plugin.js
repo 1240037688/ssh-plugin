@@ -243,6 +243,8 @@ const $showServerSidebar = atom(false)
 const $createParent = atom('/')
 // Bumped on every server switch; in-flight tree responses from an older epoch are dropped.
 let treeEpoch = 0
+// Pending server deletion ({ id, name }) — DeployPage owns the ConfirmDialog.
+const $confirmDeleteServer = atom(null)
 
 function tOf(locale, key) {
   const dict = LOCALES[locale] || LOCALES.zh
@@ -331,6 +333,22 @@ async function loadServers() {
   } catch (e) {
     $backendOk.set(false)
   }
+}
+
+async function deleteServerById(id) {
+  if (!id) return
+  await ctxRest('/servers/' + encodeURIComponent(id), { method: 'DELETE' })
+  notify('success', tOf(localeCache, 'deleted'))
+  if ($selectedId.get() === id) {
+    treeEpoch += 1
+    $selectedId.set(null)
+    $openFile.set(null)
+    $treeNodes.set({})
+    $treeLoading.set({})
+    $expanded.set({})
+    $editorDirty.set(false)
+  }
+  await loadServers()
 }
 
 async function loadTreeDir(path) {
@@ -594,6 +612,17 @@ function ServerList({ t, onEdit, onChanged }) {
               await onChanged()
             },
             children: t('setDefault')
+          }),
+          jsx(Button, {
+            size: 'sm',
+            variant: 'ghost',
+            disabled: !selected,
+            className: 'text-(--ui-text-secondary)',
+            onClick: () => {
+              const s = servers.find(x => x.id === selected)
+              if (s) $confirmDeleteServer.set({ id: s.id, name: s.name || s.id })
+            },
+            children: t('delete')
           })
         ]
       })
@@ -1501,6 +1530,15 @@ function ServerTopBar({ t, onEdit, onAdd }) {
       jsx(Button, {
         size: 'sm',
         variant: 'ghost',
+        disabled: !cur,
+        onClick: () => {
+          if (cur) $confirmDeleteServer.set({ id: cur.id, name: cur.name || cur.id })
+        },
+        children: t('delete')
+      }),
+      jsx(Button, {
+        size: 'sm',
+        variant: 'ghost',
         onClick: () => $showServerSidebar.set(!showSidebar),
         children: showSidebar ? t('hideSidebar') : t('showSidebar')
       })
@@ -1514,6 +1552,7 @@ function DeployPage({ t }) {
   const selected = useValue($selectedId)
   const pending = useValue($pendingWrite)
   const showSidebar = useValue($showServerSidebar)
+  const confirmDelServer = useValue($confirmDeleteServer)
   const [editing, setEditing] = useState(undefined) // undefined=hidden, null=create, obj=edit
 
   useEffect(() => {
@@ -1605,6 +1644,23 @@ function DeployPage({ t }) {
               children: (pending.diff || '(no textual diff / new file)').slice(0, 8000)
             })
           })
+        : null,
+      confirmDelServer
+        ? jsx(ConfirmDialog, {
+            open: true,
+            title: t('confirmDeleteServer'),
+            description: confirmDelServer.name,
+            confirmLabel: t('delete'),
+            cancelLabel: t('cancel'),
+            onConfirm: () => {
+              const target = confirmDelServer
+              $confirmDeleteServer.set(null)
+              void deleteServerById(target.id).catch(e => {
+                notify('error', String(e?.message || e))
+              })
+            },
+            onCancel: () => $confirmDeleteServer.set(null)
+          })
         : null
     ]
   })
@@ -1681,6 +1737,7 @@ export default {
       $backendOk.set(null)
       $editorDirty.set(false)
       $showServerSidebar.set(false)
+      $confirmDeleteServer.set(null)
     })
   }
 }

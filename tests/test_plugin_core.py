@@ -63,6 +63,17 @@ class TestStore(unittest.TestCase):
         self.assertTrue(ds.match_exclusion("node_modules", ["node_modules/**"]))
         self.assertFalse(ds.match_exclusion("app.py", ["node_modules/**"]))
 
+    def test_delete_server_and_default_reassignment(self):
+        a = ds.upsert_server({"name": "a", "host": "h", "username": "u", "password": "p1"})
+        b = ds.upsert_server({"name": "b", "host": "h2", "username": "u", "password": "p2"})
+        self.assertTrue(ds.delete_server(a["id"]))
+        self.assertIsNone(ds.get_server(a["id"]))
+        data = ds.load()
+        self.assertEqual([s["id"] for s in data["servers"]], [b["id"]])
+        # default was a; delete should promote remaining server
+        self.assertEqual(data["defaultServerId"], b["id"])
+        self.assertFalse(ds.delete_server("missing-id"))
+
 
 class TestSecurity(unittest.TestCase):
     def test_whitelist_full_match_and_shell_control(self):
