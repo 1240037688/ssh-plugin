@@ -251,6 +251,9 @@ const $createParent = atom('/')
 let treeEpoch = 0
 // Pending server deletion ({ id, name }) — DeployPage owns the ConfirmDialog.
 const $confirmDeleteServer = atom(null)
+// Dual-mount (route + pane) each run a selected-effect; only the first loads the tree.
+let treeLoadedFor = null
+let bootstrapped = false
 
 function tOf(locale, key) {
   const dict = LOCALES[locale] || LOCALES.zh
@@ -347,6 +350,7 @@ async function deleteServerById(id) {
   if ($pendingWrite.get()?.id === id) $pendingWrite.set(null)
   notify('success', tOf(localeCache, 'deleted'))
   if ($selectedId.get() === id) {
+    treeLoadedFor = null
     treeEpoch += 1
     $selectedId.set(null)
     $openFile.set(null)
@@ -356,6 +360,16 @@ async function deleteServerById(id) {
     $editorDirty.set(false)
   }
   await loadServers()
+}
+
+async function ensureTreeForSelected(selected) {
+  if (!selected) {
+    treeLoadedFor = null
+    return
+  }
+  if (treeLoadedFor === selected) return
+  treeLoadedFor = selected
+  await resetTreeForServer()
 }
 
 async function loadTreeDir(path) {
@@ -393,6 +407,7 @@ async function toggleDir(path) {
 }
 
 async function resetTreeForServer() {
+  treeLoadedFor = $selectedId.get()
   treeEpoch += 1
   $expanded.set({ '/': true })
   $treeNodes.set({})
@@ -1639,11 +1654,13 @@ function DeployPage({ t }) {
   const [editing, setEditing] = useState(undefined) // undefined=hidden, null=create, obj=edit
 
   useEffect(() => {
+    if (bootstrapped) return
+    bootstrapped = true
     void probeBackend().then(() => loadServers())
   }, [])
 
   useEffect(() => {
-    if (selected) void resetTreeForServer()
+    void ensureTreeForSelected(selected)
   }, [selected])
 
   return jsxs('div', {
@@ -1813,6 +1830,8 @@ export default {
     ])
 
     ctx.onDispose?.(() => {
+      bootstrapped = false
+      treeLoadedFor = null
       $servers.set([])
       $treeNodes.set({})
       $expanded.set({})
