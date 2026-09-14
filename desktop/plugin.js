@@ -50,6 +50,10 @@ const LOCALES = {
     servers: '服务器',
     addServer: '添加服务器',
     editServer: '编辑服务器',
+    showSidebar: '显示侧栏',
+    hideSidebar: '隐藏侧栏',
+    remoteFiles: '远程文件',
+    rename: '重命名',
     test: '测试连接',
     testing: '测试中…',
     setDefault: '设为默认',
@@ -136,6 +140,10 @@ const LOCALES = {
     servers: 'Servers',
     addServer: 'Add server',
     editServer: 'Edit server',
+    showSidebar: 'Show sidebar',
+    hideSidebar: 'Hide sidebar',
+    remoteFiles: 'Remote files',
+    rename: 'Rename',
     test: 'Test',
     testing: 'Testing…',
     setDefault: 'Set default',
@@ -227,6 +235,12 @@ const $openFile = atom(null) // { path, content, truncated, kind: 'text'|'image'
 const $backendOk = atom(null)
 const $editorDirty = atom(false)
 const $pendingWrite = atom(null) // { id, path, content, diff, addedLines, removedLines, identical, emptyRemote }
+// IDE tree state (object maps so useValue re-renders on replace)
+const $expanded = atom({}) // path -> true
+const $treeNodes = atom({}) // path -> entries[]
+const $treeLoading = atom({}) // path -> true
+const $showServerSidebar = atom(false)
+const $createParent = atom('/')
 
 function tOf(locale, key) {
   const dict = LOCALES[locale] || LOCALES.zh
@@ -317,33 +331,53 @@ async function loadServers() {
   }
 }
 
-async function loadList() {
+async function loadTreeDir(path) {
   const id = $selectedId.get()
-  if (!id) {
-    $entries.set([])
+  if (!id) return
+  $treeLoading.set({ ...$treeLoading.get(), [path]: true })
+  try {
+    const r = await ctxRest(
+      '/fs/ls?id=' + encodeURIComponent(id) + '&path=' + encodeURIComponent(path)
+    )
+    $treeNodes.set({ ...$treeNodes.get(), [path]: r?.entries || [] })
+  } catch (e) {
+    notify('error', String(e?.message || e))
+  } finally {
+    const l = { ...$treeLoading.get() }
+    delete l[path]
+    $treeLoading.set(l)
+  }
+}
+
+async function toggleDir(path) {
+  const exp = { ...$expanded.get() }
+  if (exp[path]) {
+    delete exp[path]
+    $expanded.set(exp)
     return
   }
-  $loadingList.set(true)
-  $listError.set(null)
-  try {
-    const path = $cwd.get() || '/'
-    const r = await ctxRest('/fs/ls?id=' + encodeURIComponent(id) + '&path=' + encodeURIComponent(path))
-    $entries.set(r?.entries || [])
-  } catch (e) {
-    $listError.set(String(e?.message || e))
-    $entries.set([])
-  } finally {
-    $loadingList.set(false)
-  }
+  exp[path] = true
+  $expanded.set(exp)
+  if (!$treeNodes.get()[path]) await loadTreeDir(path)
+}
+
+async function resetTreeForServer() {
+  $expanded.set({ '/': true })
+  $treeNodes.set({})
+  $openFile.set(null)
+  await loadTreeDir('/')
+}
+
+async function refreshTreePath(path) {
+  const parent = parentOf(path)
+  await loadTreeDir(parent || '/')
 }
 
 async function openEntry(entry) {
   const id = $selectedId.get()
   if (!id || !entry) return
   if (entry.type === 'dir') {
-    $cwd.set(entry.path)
-    $openFile.set(null)
-    await loadList()
+    await toggleDir(entry.path)
     return
   }
   try {
@@ -406,7 +440,7 @@ async function commitPendingWrite() {
     })
     $editorDirty.set(false)
     notify('success', tOf(localeCache, 'saved'))
-    await loadList()
+    await refreshTreePath(pending.path)
   } catch (e) {
     notify('error', String(e?.message || e))
   }
@@ -471,9 +505,8 @@ function ServerList({ t, onEdit, onChanged }) {
                           : 'text-(--ui-text-secondary) hover:bg-(--ui-fill-secondary)'),
                       onClick: () => {
                         $selectedId.set(s.id)
-                        $cwd.set('/')
                         $openFile.set(null)
-                        void loadList()
+                        void resetTreeForServer()
                       },
                       children: [
                         jsx(StatusDot, {
@@ -556,178 +589,214 @@ function ServerList({ t, onEdit, onChanged }) {
   })
 }
 
+function TreeRow({ t, entry, depth, onMenu }) {
+  const expanded = useValue($expanded)
+  const nodes = useValue($treeNodes)
+  const loadingMap = useValue($treeLoading)
+  const openPath = useValue($openFile)?.path
+  const isDir = entry.type === 'dir'
+  const isOpen = !!expanded[entry.path]
+  const kids = isDir && isOpen ? nodes[entry.path] || [] : []
+  const isLoading = !!loadingMap[entry.path]
+
+  return jsxs('div', { children: [
+    jsxs('div', {
+      className:
+        'flex cursor-pointer items-center gap-1.5 rounded-sm px-1 py-[3px] text-xs hover:bg-(--ui-fill-secondary)' +
+        (openPath === entry.path ? ' bg-(--ui-fill-secondary) text-(--ui-text-primary)' : ' text-(--ui-text-secondary)'),
+      style: { paddingLeft: 8 + depth * 12 },
+      onClick: () => void openEntry(entry),
+      children: [
+        isDir
+          ? jsx('span', {
+              className: 'w-3 shrink-0 text-center text-[0.625rem] text-(--ui-text-quaternary)',
+              children: isLoading ? '…' : isOpen ? 'v' : '>'
+            })
+          : jsx('span', { className: 'w-3 shrink-0' }),
+        jsx(Icon, {
+          name: isDir ? (isOpen ? 'FolderOpen' : 'Folder') : entry.isImage ? 'Image' : 'File',
+          className: 'h-3.5 w-3.5 shrink-0 text-(--ui-text-tertiary)'
+        }),
+        jsx('span', { className: 'min-w-0 flex-1 truncate', children: entry.name }),
+        !isDir
+          ? jsx('span', {
+              className: 'shrink-0 text-[0.625rem] text-(--ui-text-quaternary)',
+              children: fmtSize(entry.size)
+            })
+          : null,
+        jsx(Button, {
+          size: 'sm',
+          variant: 'ghost',
+          className: 'h-5 px-1 opacity-0 hover:opacity-100',
+          onClick: ev => {
+            ev?.stopPropagation?.()
+            onMenu?.(entry)
+          },
+          children: '⋯'
+        })
+      ]
+    }),
+    isDir && isOpen && !isLoading && kids.length === 0
+      ? jsx('div', {
+          className: 'px-2 py-0.5 text-[0.625rem] text-(--ui-text-quaternary)',
+          style: { paddingLeft: 8 + (depth + 1) * 12 },
+          children: t('emptyDir')
+        })
+      : null,
+    isDir && isOpen
+      ? kids.map(k => jsx(TreeRow, { t, entry: k, depth: depth + 1, onMenu }, k.path))
+      : null
+  ] })
+}
+
 function FileTree({ t }) {
-  const entries = useValue($entries)
-  const cwd = useValue($cwd)
-  const loading = useValue($loadingList)
-  const err = useValue($listError)
-  const path = useValue($openFile)?.path
-  const [prompt, setPrompt] = useState(null) // { kind: 'file'|'folder'|'path' }
-  const [confirmDelete, setConfirmDelete] = useState(null) // entry to delete
+  const nodes = useValue($treeNodes)
+  const expanded = useValue($expanded)
+  const loadingMap = useValue($treeLoading)
+  const [prompt, setPrompt] = useState(null)
+  const [confirmDelete, setConfirmDelete] = useState(null)
+  const [menuEntry, setMenuEntry] = useState(null)
+  const rootKids = nodes['/'] || []
+  const rootOpen = !!expanded['/']
+  const rootLoading = !!loadingMap['/']
+
+  const createParent = () => {
+    const open = $openFile.get()
+    if (open?.path) return parentOf(open.path)
+    // deepest expanded dir with children
+    let best = '/'
+    for (const p of Object.keys($expanded.get())) {
+      if ($expanded.get()[p] && p.length >= best.length) best = p
+    }
+    return best
+  }
 
   return jsxs('div', {
-    className: 'flex h-full min-w-0 flex-1 flex-col',
+    className: 'flex h-full min-w-0 flex-1 flex-col border-r border-(--ui-stroke-secondary)',
     children: [
       jsxs('div', {
         className: 'flex flex-wrap items-center gap-1 border-b border-(--ui-stroke-secondary) px-2 py-1.5',
         children: [
-          jsx(Button, {
-            size: 'sm',
-            variant: 'ghost',
-            onClick: () => {
-              $cwd.set(parentOf(cwd))
-              $openFile.set(null)
-              void loadList()
-            },
-            children: t('up')
-          }),
-          jsx(ScrollArea, {
-            className: 'min-w-0 flex-1',
-            children: jsx('div', {
-              className: 'flex items-center gap-0.5 overflow-x-auto whitespace-nowrap text-[0.6875rem] text-(--ui-text-secondary)',
-              children: crumbs(cwd).map((c, i, arr) =>
-                jsxs(
-                  'span',
-                  {
-                    className: 'inline-flex items-center',
-                    children: [
-                      jsx(
-                        'button',
-                        {
-                          type: 'button',
-                          className:
-                            'rounded px-1 hover:text-(--ui-text-primary)' +
-                            (i === arr.length - 1 ? ' font-medium text-(--ui-text-primary)' : ''),
-                          onClick: () => {
-                            $cwd.set(c.path)
-                            $openFile.set(null)
-                            void loadList()
-                          },
-                          children: c.label
-                        },
-                        c.path
-                      ),
-                      i < arr.length - 1
-                        ? jsx('span', { className: 'text-(--ui-text-quaternary)', children: '/' }, 'sep')
-                        : null
-                    ]
-                  },
-                  'c' + i
-                )
-              )
-            })
+          jsx('div', {
+            className: 'mr-auto text-[0.6875rem] font-medium text-(--ui-text-tertiary)',
+            children: t('remoteFiles') || 'Remote'
           }),
           jsx(Button, {
             size: 'sm',
             variant: 'ghost',
-            onClick: () => void loadList(),
+            onClick: () => void resetTreeForServer(),
             children: t('refresh')
           }),
           jsx(Button, {
             size: 'sm',
             variant: 'outline',
-            onClick: () => setPrompt({ kind: 'file' }),
+            onClick: () => {
+              $createParent.set(createParent())
+              setPrompt({ kind: 'file' })
+            },
             children: t('newFile')
           }),
           jsx(Button, {
             size: 'sm',
             variant: 'outline',
-            onClick: () => setPrompt({ kind: 'folder' }),
+            onClick: () => {
+              $createParent.set(createParent())
+              setPrompt({ kind: 'folder' })
+            },
             children: t('newFolder')
           })
         ]
       }),
-      err
-        ? jsx('div', {
-            className: 'px-2 py-1 text-[0.6875rem] text-(--ui-text-secondary)',
-            children: err
-          })
-        : null,
-      loading
+      rootLoading && rootKids.length === 0
         ? jsx('div', {
             className: 'flex flex-col gap-2 p-3',
             children: [0, 1, 2, 3].map(i => jsx(Skeleton, { className: 'h-6' }, i))
           })
         : jsx(ScrollArea, {
-            className: 'flex-1',
-            children:
-              entries.length === 0
-                ? jsx('div', {
-                    className: 'px-3 py-6 text-xs text-(--ui-text-tertiary)',
-                    children: t('emptyDir')
-                  })
-                : jsx('ul', {
-                    className: 'divide-y divide-(--ui-stroke-secondary)',
-                    children: entries.map(e =>
-                      jsxs(
-                        'li',
-                        {
-                          className:
-                            'flex cursor-pointer items-center gap-2 px-2 py-1.5 text-xs hover:bg-(--ui-fill-secondary)' +
-                            (path === e.path ? ' bg-(--ui-fill-secondary)' : ''),
-                          onClick: () => void openEntry(e),
-                          children: [
-                            jsx(Icon, {
-                              name: e.type === 'dir' ? 'Folder' : e.isImage ? 'Image' : 'File',
-                              className: 'h-3.5 w-3.5 shrink-0 text-(--ui-text-tertiary)'
-                            }),
-                            jsx('span', {
-                              className: 'min-w-0 flex-1 truncate text-(--ui-text-primary)',
-                              children: e.name
-                            }),
-                            jsx('span', {
-                              className: 'shrink-0 text-[0.625rem] text-(--ui-text-quaternary)',
-                              children: e.type === 'dir' ? '' : fmtSize(e.size)
-                            }),
-                            jsx(Button, {
-                              size: 'sm',
-                              variant: 'ghost',
-                              className: 'h-6 px-1 opacity-70',
-                              onClick: ev => {
-                                ev?.stopPropagation?.()
-                                void (async () => {
-                                  const id = $selectedId.get()
-                                  if (!id) return
-                                  const nextName = window.prompt(t('fileName'), e.name)
-                                  if (!nextName || nextName === e.name) return
-                                  const next = joinPath(parentOf(e.path), nextName.trim())
-                                  try {
-                                    await ctxRest('/fs/rename', {
-                                      method: 'POST',
-                                      body: { id, src: e.path, dst: next, from: e.path, to: next }
-                                    })
-                                    notify('success', t('renamed'))
-                                    if ($openFile.get()?.path === e.path) $openFile.set(null)
-                                    await loadList()
-                                  } catch (err2) {
-                                    notify('error', String(err2?.message || err2))
-                                  }
-                                })()
-                              },
-                              children: '✎'
-                            }),
-                            jsx(Button, {
-                              size: 'sm',
-                              variant: 'ghost',
-                              className: 'h-6 px-1 opacity-70',
-                              onClick: ev => {
-                                ev?.stopPropagation?.()
-                                setConfirmDelete(e)
-                              },
-                              children: '×'
-                            })
-                          ]
-                        },
-                        e.path
-                      )
-                    )
-                  })
+            className: 'flex-1 py-1',
+            children: jsxs('div', { children: [
+              jsxs('div', {
+                className:
+                  'flex cursor-pointer items-center gap-1.5 rounded-sm px-2 py-[3px] text-xs font-medium hover:bg-(--ui-fill-secondary)',
+                onClick: () => void toggleDir('/'),
+                children: [
+                  jsx('span', {
+                    className: 'w-3 shrink-0 text-center text-[0.625rem]',
+                    children: rootLoading ? '…' : rootOpen ? 'v' : '>'
+                  }),
+                  jsx(Icon, { name: 'Server', className: 'h-3.5 w-3.5 text-(--ui-text-tertiary)' }),
+                  jsx('span', { children: '/' })
+                ]
+              }),
+              rootOpen
+                ? rootKids.map(e => jsx(TreeRow, { t, entry: e, depth: 1, onMenu: setMenuEntry }, e.path))
+                : null
+            ] })
           }),
       prompt
         ? jsx(PathPrompt, {
             t,
             mode: prompt.kind,
+            parent: $createParent.get(),
             onClose: () => setPrompt(null)
+          })
+        : null,
+      menuEntry
+        ? jsx(Dialog, {
+            open: true,
+            onOpenChange: o => { if (!o) setMenuEntry(null) },
+            children: jsxs(DialogContent, {
+              className: 'sm:max-w-sm',
+              children: [
+                jsx(DialogHeader, {
+                  children: jsx(DialogTitle, { children: menuEntry.name })
+                }),
+                jsx('div', {
+                  className: 'text-[0.6875rem] text-(--ui-text-tertiary)',
+                  children: menuEntry.path
+                }),
+                jsx(DialogFooter, {
+                  className: 'flex-col gap-1 sm:flex-col',
+                  children: [
+                    jsx(Button, {
+                      size: 'sm',
+                      variant: 'outline',
+                      onClick: async () => {
+                        const id = $selectedId.get()
+                        const e = menuEntry
+                        setMenuEntry(null)
+                        if (!id || !e) return
+                        const nextName = window.prompt(t('fileName'), e.name)
+                        if (!nextName || nextName === e.name) return
+                        const next = joinPath(parentOf(e.path), nextName.trim())
+                        try {
+                          await ctxRest('/fs/rename', {
+                            method: 'POST',
+                            body: { id, src: e.path, dst: next, from: e.path, to: next }
+                          })
+                          notify('success', t('renamed'))
+                          if ($openFile.get()?.path === e.path) $openFile.set(null)
+                          await refreshTreePath(e.path)
+                          await refreshTreePath(next)
+                        } catch (err2) {
+                          notify('error', String(err2?.message || err2))
+                        }
+                      },
+                      children: t('rename') || 'Rename'
+                    }, 'r'),
+                    jsx(Button, {
+                      size: 'sm',
+                      variant: 'ghost',
+                      onClick: () => {
+                        setConfirmDelete(menuEntry)
+                        setMenuEntry(null)
+                      },
+                      children: t('delete')
+                    }, 'd')
+                  ]
+                })
+              ]
+            })
           })
         : null,
       confirmDelete
@@ -749,7 +818,7 @@ function FileTree({ t }) {
                 })
                 notify('success', t('deleted'))
                 if ($openFile.get()?.path === target.path) $openFile.set(null)
-                await loadList()
+                await refreshTreePath(target.path)
               } catch (err2) {
                 notify('error', String(err2?.message || err2))
               }
@@ -761,9 +830,9 @@ function FileTree({ t }) {
   })
 }
 
-function PathPrompt({ t, mode, onClose }) {
+function PathPrompt({ t, mode, parent, onClose }) {
   const [name, setName] = useState('')
-  const cwd = useValue($cwd)
+  const base = parent || '/'
   return jsx(Dialog, {
     open: true,
     onOpenChange: open => {
@@ -776,6 +845,10 @@ function PathPrompt({ t, mode, onClose }) {
           children: jsx(DialogTitle, {
             children: mode === 'folder' ? t('newFolder') : t('newFile')
           })
+        }),
+        jsx('div', {
+          className: 'mb-2 text-[0.6875rem] text-(--ui-text-tertiary)',
+          children: base
         }),
         jsx(Input, {
           value: name,
@@ -790,7 +863,7 @@ function PathPrompt({ t, mode, onClose }) {
               {
                 onClick: async () => {
                   const id = $selectedId.get()
-                  const full = joinPath(cwd, name.trim())
+                  const full = joinPath(base, name.trim())
                   if (!id || !name.trim()) return
                   try {
                     if (mode === 'folder') {
@@ -803,7 +876,11 @@ function PathPrompt({ t, mode, onClose }) {
                     }
                     notify('success', t('created'))
                     onClose()
-                    await loadList()
+                    // ensure parent expanded and refreshed
+                    const exp = { ...$expanded.get() }
+                    exp[base] = true
+                    $expanded.set(exp)
+                    await loadTreeDir(base)
                   } catch (e) {
                     notify('error', String(e?.message || e))
                   }
@@ -1251,11 +1328,122 @@ function ServerDialog({ t, server, onClose, onSaved }) {
   })
 }
 
+function ServerTopBar({ t, onEdit, onChanged, onAdd }) {
+  const servers = useValue($servers)
+  const selected = useValue($selectedId)
+  const showSidebar = useValue($showServerSidebar)
+  const cur = servers.find(s => s.id === selected) || null
+  const defaultId = useValue($defaultId)
+  const [openSwitch, setOpenSwitch] = useState(false)
+
+  return jsxs('div', {
+    className:
+      'flex flex-wrap items-center gap-2 border-b border-(--ui-stroke-secondary) bg-(--ui-panel-background) px-3 py-1.5',
+    children: [
+      jsx(StatusDot, { variant: cur ? 'success' : 'neutral' }),
+      jsx('button', {
+        type: 'button',
+        className:
+          'flex min-w-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-xs hover:bg-(--ui-fill-secondary)',
+        onClick: () => setOpenSwitch(v => !v),
+        children: [
+          jsx('span', {
+            className: 'font-medium text-(--ui-text-primary)',
+            children: cur ? cur.name || cur.id : t('noServer')
+          }),
+          cur
+            ? jsx('span', {
+                className: 'truncate text-[0.6875rem] text-(--ui-text-tertiary)',
+                children: (cur.username || '') + '@' + (cur.host || '') + ':' + (cur.port || 22)
+              })
+            : null,
+          jsx('span', { className: 'text-[0.625rem] text-(--ui-text-quaternary)', children: '⌄' })
+        ]
+      }),
+      cur && cur.id === defaultId
+        ? jsx(Badge, { variant: 'outline', className: 'text-[0.5625rem]', children: 'D' })
+        : null,
+      jsx('div', { className: 'flex-1' }),
+      jsx(Button, {
+        size: 'sm',
+        variant: 'ghost',
+        onClick: () => onAdd(),
+        children: '+'
+      }),
+      jsx(Button, {
+        size: 'sm',
+        variant: 'outline',
+        disabled: !cur,
+        onClick: () => cur && onEdit(cur),
+        children: t('editServer')
+      }),
+      jsx(Button, {
+        size: 'sm',
+        variant: 'ghost',
+        disabled: !cur,
+        onClick: async () => {
+          if (!cur) return
+          try {
+            const r = await ctxRest('/servers/' + encodeURIComponent(cur.id) + '/test', {
+              method: 'POST',
+              body: {}
+            })
+            if (r?.ok) notify('success', t('testOk') + (r.hostname ? ': ' + r.hostname : ''))
+            else notify('error', t('testFail') + ': ' + (r?.error || ''))
+          } catch (e) {
+            notify('error', String(e?.message || e))
+          }
+        },
+        children: t('test')
+      }),
+      jsx(Button, {
+        size: 'sm',
+        variant: 'ghost',
+        onClick: () => $showServerSidebar.set(!showSidebar),
+        children: showSidebar ? t('hideSidebar') : t('showSidebar')
+      }),
+      openSwitch && servers.length > 0
+        ? jsx('div', {
+            className:
+              'absolute z-20 mt-1 max-h-64 w-72 overflow-auto rounded-md border border-(--ui-stroke-secondary) bg-(--ui-panel-background) shadow-lg',
+            style: { top: 48 },
+            children: servers.map(s =>
+              jsx(
+                'button',
+                {
+                  type: 'button',
+                  className:
+                    'flex w-full items-center gap-2 px-2 py-1.5 text-left text-xs hover:bg-(--ui-fill-secondary)',
+                  onClick: () => {
+                    $selectedId.set(s.id)
+                    setOpenSwitch(false)
+                    void onChanged()
+                  },
+                  children: [
+                    jsx(StatusDot, { variant: s.id === selected ? 'success' : 'neutral', key: 'd' }),
+                    jsx('span', { className: 'flex-1 truncate font-medium', children: s.name || s.id, key: 'n' }),
+                    jsx('span', {
+                      className: 'text-[0.625rem] text-(--ui-text-tertiary)',
+                      children: s.host + ':' + s.port,
+                      key: 'h'
+                    })
+                  ]
+                },
+                s.id
+              )
+            )
+          })
+        : null
+    ]
+  })
+}
+
 function DeployPage({ t }) {
   const servers = useValue($servers)
   const backend = useValue($backendOk)
   const selected = useValue($selectedId)
   const pending = useValue($pendingWrite)
+  const showSidebar = useValue($showServerSidebar)
   const [editing, setEditing] = useState(undefined) // undefined=hidden, null=create, obj=edit
 
   useEffect(() => {
@@ -1263,34 +1451,19 @@ function DeployPage({ t }) {
   }, [])
 
   useEffect(() => {
-    if (selected) void loadList()
+    if (selected) void resetTreeForServer()
   }, [selected])
 
   return jsxs('div', {
-    className: 'flex h-full min-h-0 flex-col text-sm',
+    className: 'relative flex h-full min-h-0 flex-col text-sm',
     children: [
-      jsxs('div', {
-        className: 'flex items-center gap-2 border-b border-(--ui-stroke-secondary) px-3 py-2',
-        children: [
-          jsx(Icon, { name: 'Remote', className: 'h-4 w-4 text-(--ui-text-tertiary)' }),
-          jsxs('div', {
-            className: 'min-w-0 flex-1',
-            children: [
-              jsx('div', {
-                className: 'text-sm font-medium text-(--ui-text-primary)',
-                children: t('title')
-              }),
-              jsx('div', {
-                className: 'truncate text-[0.6875rem] text-(--ui-text-tertiary)',
-                children: t('subtitle')
-              })
-            ]
-          }),
-          jsx(Badge, {
-            variant: backend ? 'default' : 'outline',
-            children: backend ? t('statusOnline') : t('statusOffline')
-          })
-        ]
+      jsx(ServerTopBar, {
+        t,
+        onEdit: s => setEditing(s),
+        onAdd: () => setEditing(null),
+        onChanged: async () => {
+          /* selected already set */
+        }
       }),
       backend === false
         ? jsx('div', {
@@ -1301,13 +1474,15 @@ function DeployPage({ t }) {
       jsxs('div', {
         className: 'flex min-h-0 flex-1',
         children: [
-          jsx(ServerList, {
-            t,
-            onEdit: s => setEditing(s),
-            onChanged: async () => {
-              await loadServers()
-            }
-          }),
+          showSidebar
+            ? jsx(ServerList, {
+                t,
+                onEdit: s => setEditing(s),
+                onChanged: async () => {
+                  await loadServers()
+                }
+              })
+            : null,
           servers.length === 0
             ? jsx('div', {
                 className: 'flex flex-1 items-center justify-center',
@@ -1322,7 +1497,11 @@ function DeployPage({ t }) {
               })
             : jsxs('div', {
                 className: 'flex min-w-0 flex-1',
-                children: [jsx(FileTree, { t }), jsx('div', { className: 'w-px bg-(--ui-stroke-secondary)' }), jsx('div', { className: 'min-w-0 flex-1', children: jsx(EditorPanel, { t }) })]
+                children: [
+                  jsx(FileTree, { t }),
+                  jsx('div', { className: 'w-px bg-(--ui-stroke-secondary)' }),
+                  jsx('div', { className: 'min-w-0 flex-1', children: jsx(EditorPanel, { t }) })
+                ]
               })
         ]
       }),
@@ -1333,7 +1512,7 @@ function DeployPage({ t }) {
             onClose: () => setEditing(undefined),
             onSaved: async () => {
               await loadServers()
-              await loadList()
+              await resetTreeForServer()
             }
           })
         : null,
@@ -1428,12 +1607,13 @@ export default {
 
     ctx.onDispose?.(() => {
       $servers.set([])
-      $entries.set([])
+      $treeNodes.set({})
+      $expanded.set({})
       $openFile.set(null)
       $selectedId.set(null)
-      $cwd.set('/')
       $backendOk.set(null)
       $editorDirty.set(false)
+      $showServerSidebar.set(false)
     })
   }
 }
