@@ -27,6 +27,10 @@ import {
   DialogHeader,
   DialogTitle,
   ConfirmDialog,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
   icons,
   PANES_AREA,
   ROUTES_AREA,
@@ -237,6 +241,8 @@ const $treeNodes = atom({}) // path -> entries[]
 const $treeLoading = atom({}) // path -> true
 const $showServerSidebar = atom(false)
 const $createParent = atom('/')
+// Bumped on every server switch; in-flight tree responses from an older epoch are dropped.
+let treeEpoch = 0
 
 function tOf(locale, key) {
   const dict = LOCALES[locale] || LOCALES.zh
@@ -330,18 +336,22 @@ async function loadServers() {
 async function loadTreeDir(path) {
   const id = $selectedId.get()
   if (!id) return
+  const epoch = treeEpoch
   $treeLoading.set({ ...$treeLoading.get(), [path]: true })
   try {
     const r = await ctxRest(
       '/fs/ls?id=' + encodeURIComponent(id) + '&path=' + encodeURIComponent(path)
     )
+    if (epoch !== treeEpoch) return
     $treeNodes.set({ ...$treeNodes.get(), [path]: r?.entries || [] })
   } catch (e) {
-    notify('error', String(e?.message || e))
+    if (epoch === treeEpoch) notify('error', String(e?.message || e))
   } finally {
-    const l = { ...$treeLoading.get() }
-    delete l[path]
-    $treeLoading.set(l)
+    if (epoch === treeEpoch) {
+      const l = { ...$treeLoading.get() }
+      delete l[path]
+      $treeLoading.set(l)
+    }
   }
 }
 
@@ -358,9 +368,12 @@ async function toggleDir(path) {
 }
 
 async function resetTreeForServer() {
+  treeEpoch += 1
   $expanded.set({ '/': true })
   $treeNodes.set({})
+  $treeLoading.set({})
   $openFile.set(null)
+  $editorDirty.set(false)
   await loadTreeDir('/')
 }
 
@@ -376,12 +389,15 @@ async function openEntry(entry) {
     await toggleDir(entry.path)
     return
   }
+  const epoch = treeEpoch
   try {
     if (entry.isImage || isImagePath(entry.path)) {
       const r = await ctxRest('/fs/preview?id=' + encodeURIComponent(id) + '&path=' + encodeURIComponent(entry.path))
+      if (epoch !== treeEpoch) return
       $openFile.set({ path: entry.path, kind: 'image', dataUrl: r?.dataUrl, content: '' })
     } else if (entry.isText !== false && (entry.isText || isLikelyText(entry.path))) {
       const r = await ctxRest('/fs/read?id=' + encodeURIComponent(id) + '&path=' + encodeURIComponent(entry.path))
+      if (epoch !== treeEpoch) return
       $openFile.set({
         path: entry.path,
         kind: 'text',
@@ -393,7 +409,7 @@ async function openEntry(entry) {
     }
     $editorDirty.set(false)
   } catch (e) {
-    notify('error', String(e?.message || e))
+    if (epoch === treeEpoch) notify('error', String(e?.message || e))
   }
 }
 
@@ -502,7 +518,7 @@ function ServerList({ t, onEdit, onChanged }) {
                       onClick: () => {
                         $selectedId.set(s.id)
                         $openFile.set(null)
-                        void resetTreeForServer()
+                        // Tree reload is owned by DeployPage's selected-effect (epoch-safe).
                       },
                       children: [
                         jsx(StatusDot, {
@@ -1324,38 +1340,128 @@ function ServerDialog({ t, server, onClose, onSaved }) {
   })
 }
 
-function ServerTopBar({ t, onEdit, onChanged, onAdd }) {
+function ServerTopBar({ t, onEdit, onAdd }) {
   const servers = useValue($servers)
   const selected = useValue($selectedId)
   const showSidebar = useValue($showServerSidebar)
   const cur = servers.find(s => s.id === selected) || null
   const defaultId = useValue($defaultId)
-  const [openSwitch, setOpenSwitch] = useState(false)
 
   return jsxs('div', {
     className:
       'flex flex-wrap items-center gap-2 border-b border-(--ui-stroke-secondary) bg-(--ui-panel-background) px-3 py-1.5',
     children: [
       jsx(StatusDot, { variant: cur ? 'success' : 'neutral' }),
-      jsx('button', {
-        type: 'button',
-        className:
-          'flex min-w-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-xs hover:bg-(--ui-fill-secondary)',
-        onClick: () => setOpenSwitch(v => !v),
-        children: [
-          jsx('span', {
-            className: 'font-medium text-(--ui-text-primary)',
-            children: cur ? cur.name || cur.id : t('noServer')
+      servers.length > 0
+        ? jsx(DropdownMenu, {
+            children: [
+              jsx(
+                DropdownMenuTrigger,
+                {
+                  asChild: true,
+                  children: jsx(Button, {
+                    size: 'sm',
+                    variant: 'ghost',
+                    className: 'max-w-[min(20rem,50vw)] min-w-0 gap-1 px-1.5 text-xs',
+                    children: jsxs('span', {
+                      className: 'flex min-w-0 items-center gap-1.5',
+                      children: [
+                        jsx('span', {
+                          className: 'truncate font-medium text-(--ui-text-primary)',
+                          children: cur ? cur.name || cur.id : t('noServer')
+                        }),
+                        cur
+                          ? jsx('span', {
+                              className:
+                                'truncate text-[0.6875rem] font-normal text-(--ui-text-tertiary)',
+                              children:
+                                (cur.username || '') +
+                                '@' +
+                                (cur.host || '') +
+                                ':' +
+                                (cur.port || 22)
+                            })
+                          : null,
+                        jsx('span', {
+                          className: 'shrink-0 text-[0.625rem] text-(--ui-text-quaternary)',
+                          children: '⌄'
+                        })
+                      ]
+                    })
+                  })
+                },
+                'trigger'
+              ),
+              jsx(
+                DropdownMenuContent,
+                {
+                  align: 'start',
+                  className: 'max-h-64 w-72 overflow-auto',
+                  children: servers.map(s =>
+                    jsx(
+                      DropdownMenuItem,
+                      {
+                        className:
+                          'flex items-center gap-2 text-xs ' +
+                          (s.id === selected ? 'bg-(--ui-fill-secondary)' : ''),
+                        onSelect: () => {
+                          if (s.id !== $selectedId.get()) $selectedId.set(s.id)
+                        },
+                        children: [
+                          jsx(StatusDot, {
+                            key: 'd',
+                            variant: s.id === selected ? 'success' : 'neutral'
+                          }),
+                          jsxs(
+                            'span',
+                            {
+                              key: 'body',
+                              className: 'flex min-w-0 flex-1 flex-col',
+                              children: [
+                                jsx('span', {
+                                  className: 'truncate font-medium',
+                                  children: s.name || s.id
+                                }),
+                                jsx('span', {
+                                  className:
+                                    'truncate text-[0.625rem] text-(--ui-text-tertiary)',
+                                  children:
+                                    (s.username || '') +
+                                    '@' +
+                                    (s.host || '') +
+                                    ':' +
+                                    (s.port || 22)
+                                })
+                              ]
+                            },
+                            'b'
+                          ),
+                          s.id === defaultId
+                            ? jsx(
+                                Badge,
+                                {
+                                  key: 'def',
+                                  variant: 'outline',
+                                  className: 'shrink-0 text-[0.5625rem]',
+                                  children: 'D'
+                                },
+                                'def'
+                              )
+                            : null
+                        ]
+                      },
+                      s.id
+                    )
+                  )
+                },
+                'content'
+              )
+            ]
+          })
+        : jsx('span', {
+            className: 'text-xs text-(--ui-text-tertiary)',
+            children: t('noServer')
           }),
-          cur
-            ? jsx('span', {
-                className: 'truncate text-[0.6875rem] text-(--ui-text-tertiary)',
-                children: (cur.username || '') + '@' + (cur.host || '') + ':' + (cur.port || 22)
-              })
-            : null,
-          jsx('span', { className: 'text-[0.625rem] text-(--ui-text-quaternary)', children: '⌄' })
-        ]
-      }),
       cur && cur.id === defaultId
         ? jsx(Badge, { variant: 'outline', className: 'text-[0.5625rem]', children: 'D' })
         : null,
@@ -1397,39 +1503,7 @@ function ServerTopBar({ t, onEdit, onChanged, onAdd }) {
         variant: 'ghost',
         onClick: () => $showServerSidebar.set(!showSidebar),
         children: showSidebar ? t('hideSidebar') : t('showSidebar')
-      }),
-      openSwitch && servers.length > 0
-        ? jsx('div', {
-            className:
-              'absolute z-20 mt-1 max-h-64 w-72 overflow-auto rounded-md border border-(--ui-stroke-secondary) bg-(--ui-panel-background) shadow-lg',
-            style: { top: 48 },
-            children: servers.map(s =>
-              jsx(
-                'button',
-                {
-                  type: 'button',
-                  className:
-                    'flex w-full items-center gap-2 px-2 py-1.5 text-left text-xs hover:bg-(--ui-fill-secondary)',
-                  onClick: () => {
-                    $selectedId.set(s.id)
-                    setOpenSwitch(false)
-                    void onChanged()
-                  },
-                  children: [
-                    jsx(StatusDot, { variant: s.id === selected ? 'success' : 'neutral', key: 'd' }),
-                    jsx('span', { className: 'flex-1 truncate font-medium', children: s.name || s.id, key: 'n' }),
-                    jsx('span', {
-                      className: 'text-[0.625rem] text-(--ui-text-tertiary)',
-                      children: s.host + ':' + s.port,
-                      key: 'h'
-                    })
-                  ]
-                },
-                s.id
-              )
-            )
-          })
-        : null
+      })
     ]
   })
 }
@@ -1456,10 +1530,7 @@ function DeployPage({ t }) {
       jsx(ServerTopBar, {
         t,
         onEdit: s => setEditing(s),
-        onAdd: () => setEditing(null),
-        onChanged: async () => {
-          /* selected already set */
-        }
+        onAdd: () => setEditing(null)
       }),
       backend === false
         ? jsx('div', {

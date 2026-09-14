@@ -14,13 +14,28 @@ Security model (aligned with hermes-vault desktop adapter conventions):
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, TypeVar
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
+
+_T = TypeVar("_T")
+
+# Paramiko is blocking; keep it off the uvicorn event loop so a slow/hung
+# SSH handshake cannot freeze /health and the rest of the plugin REST API.
+_SSH_EXECUTOR = ThreadPoolExecutor(max_workers=8, thread_name_prefix="ssh-plugin")
+
+
+async def _ssh_call(fn: Callable[..., _T], /, *args: Any, **kwargs: Any) -> _T:
+    loop = asyncio.get_running_loop()
+    if kwargs:
+        return await loop.run_in_executor(_SSH_EXECUTOR, lambda: fn(*args, **kwargs))
+    return await loop.run_in_executor(_SSH_EXECUTOR, fn, *args)
 
 _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
@@ -202,7 +217,7 @@ async def health() -> dict[str, Any]:
 @router.get("/health/server")
 async def health_server(id: str) -> dict[str, Any]:
     server = _server_or_404(id)
-    return sftp_client.health_check(server)
+    return await _ssh_call(sftp_client.health_check, server)
 
 
 @router.get("/conn/stats")
@@ -233,7 +248,9 @@ async def fs_sync(body: SyncIn) -> dict[str, Any]:
     if not local_root:
         raise HTTPException(status_code=400, detail="localRoot required (or configure mappings)")
     try:
-        result = plan_sync(server, local_root, dry_run=body.dryRun, max_files=body.maxFiles)
+        result = await _ssh_call(
+            plan_sync, server, local_root, dry_run=body.dryRun, max_files=body.maxFiles
+        )
         if result.get("ok"):
             _audit(
                 "sync",
@@ -289,7 +306,7 @@ async def set_default(body: dict[str, Any]) -> dict[str, Any]:
 @router.post("/servers/{server_id}/test")
 async def test_server(server_id: str) -> dict[str, Any]:
     server = _server_or_404(server_id)
-    return sftp_client.test_connection(server)
+    return await _ssh_call(sftp_client.test_connection, server)
 
 
 @router.get("/fs/ls")
@@ -297,7 +314,7 @@ async def fs_ls(id: str, path: str = "/") -> dict[str, Any]:
     server = _server_or_404(id)
     p = _safe_path(server, path)
     try:
-        result = sftp_client.list_dir(server, p)
+        result = await _ssh_call(sftp_client.list_dir, server, p)
     except sftp_client.SftpError as exc:
         raise _err(exc, 502) from exc
     except Exception as exc:
@@ -317,10 +334,14 @@ async def fs_read(
     p = _safe_path(server, path)
     try:
         if offset is not None or limit is not None:
-            return sftp_client.read_text_chunk(
-                server, p, offset=offset or 0, limit=limit or sftp_client.CHUNK_DEFAULT
+            return await _ssh_call(
+                sftp_client.read_text_chunk,
+                server,
+                p,
+                offset=offset or 0,
+                limit=limit or sftp_client.CHUNK_DEFAULT,
             )
-        return sftp_client.read_text(server, p)
+        return await _ssh_call(sftp_client.read_text, server, p)
     except Exception as exc:
         raise _err(exc, 502) from exc
 
@@ -330,7 +351,7 @@ async def fs_preview(id: str, path: str) -> dict[str, Any]:
     server = _server_or_404(id)
     p = _safe_path(server, path)
     try:
-        return sftp_client.preview_image(server, p)
+        return await _ssh_call(sftp_client.preview_image, server, p)
     except Exception as exc:
         raise _err(exc, 502) from exc
 
@@ -340,7 +361,7 @@ async def fs_download(id: str, path: str) -> dict[str, Any]:
     server = _server_or_404(id)
     p = _safe_path(server, path)
     try:
-        data = sftp_client.download_bytes(server, p)
+        data = await _ssh_call(sftp_client.download_bytes, server, p)
     except Exception as exc:
         raise _err(exc, 502) from exc
     name = p.rstrip("/").rsplit("/", 1)[-1]
@@ -359,13 +380,13 @@ async def fs_write(body: WriteIn) -> dict[str, Any]:
     try:
         old = ""
         try:
-            old = sftp_client.read_text(server, p)["content"]
+            old = (await _ssh_call(sftp_client.read_text, server, p))["content"]
         except Exception:
             old = ""
         meta = unified_diff(old, body.content, p)
         if body.dryRun:
             return {"ok": True, "dryRun": True, "written": False, **meta}
-        result = sftp_client.write_text(server, p, body.content)
+        result = await _ssh_call(sftp_client.write_text, server, p, body.content)
         _audit("write", server, p, addedLines=meta["addedLines"], removedLines=meta["removedLines"])
         return {
             "ok": True,
@@ -397,7 +418,7 @@ async def fs_mkdir(body: MkdirIn) -> dict[str, Any]:
     server = _server_or_404(body.id)
     p = _safe_path(server, body.path)
     try:
-        result = sftp_client.mkdir(server, p)
+        result = await _ssh_call(sftp_client.mkdir, server, p)
         _audit("mkdir", server, p)
         return result
     except Exception as exc:
@@ -414,7 +435,7 @@ async def fs_rename(body: RenameIn) -> dict[str, Any]:
     src = _safe_path(server, raw_src)
     dst = _safe_path(server, raw_dst)
     try:
-        result = sftp_client.rename(server, src, dst)
+        result = await _ssh_call(sftp_client.rename, server, src, dst)
         _audit("rename", server, src, dst=dst)
         return result
     except Exception as exc:
@@ -429,7 +450,7 @@ async def fs_delete(body: DeleteIn) -> dict[str, Any]:
     if p == "/":
         raise HTTPException(status_code=400, detail="refusing to delete root")
     try:
-        result = sftp_client.delete(server, p, recursive=body.recursive)
+        result = await _ssh_call(sftp_client.delete, server, p, recursive=body.recursive)
         _audit("delete", server, p, recursive=body.recursive)
         return result
     except Exception as exc:
@@ -449,7 +470,7 @@ async def fs_upload(body: UploadIn) -> dict[str, Any]:
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"invalid base64: {exc}") from exc
     try:
-        result = sftp_client.upload_bytes(server, p, raw)
+        result = await _ssh_call(sftp_client.upload_bytes, server, p, raw)
         _audit("upload", server, p, bytes=result.get("bytes"))
         return result
     except Exception as exc:
@@ -479,7 +500,9 @@ async def put_mappings(body: MappingsIn) -> dict[str, Any]:
 async def exec_cmd(body: ExecIn) -> dict[str, Any]:
     server = _server_or_404(body.id)
     try:
-        result = sftp_client.exec_command(server, body.command, timeout=body.timeout)
+        result = await _ssh_call(
+            sftp_client.exec_command, server, body.command, timeout=body.timeout
+        )
         _audit("exec", server, None, command=body.command[:200], exitCode=result.get("exitCode"))
         return result
     except sftp_client.SftpError as exc:

@@ -48,7 +48,8 @@ def _connect_kwargs(server: dict[str, Any]) -> dict[str, Any]:
     host = server.get("host")
     if not host:
         raise SessionError("server host is empty")
-    timeout = float(server.get("connectionTimeoutMs") or 30000) / 1000.0
+    # Default 10s — a hung handshake must not pin a worker for 30s.
+    timeout = float(server.get("connectionTimeoutMs") or 10000) / 1000.0
     kwargs: dict[str, Any] = {
         "hostname": host,
         "port": int(server.get("port") or 22),
