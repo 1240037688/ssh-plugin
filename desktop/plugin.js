@@ -122,8 +122,9 @@ const LOCALES = {
     enterPath: '输入远程绝对路径',
     placeholderHost: '例如 192.168.1.10',
     placeholderUser: 'root',
-    placeholderPass: '仅保存在 gateway 本地',
-    placeholderKey: '~/.ssh/id_rsa',
+    placeholderPass: '仅保存在 gateway 本地，或 hv://service[?alias=]',
+    placeholderKey: '~/.ssh/id_rsa 或 hv://service',
+    vaultHint: '可选：填 hv://service[?alias=]（需本机安装 hermes_vault；未安装则忽略该引用）',
     placeholderLocal: 'E:/project',
     placeholderRemote: '/var/www/html',
     saved: '已保存',
@@ -215,8 +216,9 @@ const LOCALES = {
     enterPath: 'Absolute remote path',
     placeholderHost: 'e.g. 192.168.1.10',
     placeholderUser: 'root',
-    placeholderPass: 'Stored on gateway only',
-    placeholderKey: '~/.ssh/id_rsa',
+    placeholderPass: 'Stored on gateway only, or hv://service[?alias=]',
+    placeholderKey: '~/.ssh/id_rsa or hv://service',
+    vaultHint: 'Optional: hv://service[?alias=] if hermes_vault is installed; otherwise the ref is ignored',
     placeholderLocal: 'E:/project',
     placeholderRemote: '/var/www/html',
     saved: 'Saved',
@@ -1204,6 +1206,10 @@ function ServerDialog({ t, server, onClose, onSaved }) {
                           value: form.password,
                           placeholder: t('placeholderPass'),
                           onChange: e => set('password', e.target.value)
+                        }),
+                        jsx('div', {
+                          className: 'text-[0.625rem] font-normal text-(--ui-text-tertiary)',
+                          children: t('vaultHint')
                         })
                       ]
                     })
