@@ -1,5 +1,5 @@
 name: ssh-plugin
-version: 0.2.0
+version: 0.2.1
 description: Visual SSH deployment and remote file manager (PyCharm-style Connection/Mappings/Exclusions)
 manifest_version: 2
 api_version: 1

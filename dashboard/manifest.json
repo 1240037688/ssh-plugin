@@ -3,7 +3,7 @@
   "label": "SSH Deploy",
   "description": "Visual SSH/SFTP file manager and deployment helpers with keep-alive sessions for Hermes agents.",
   "icon": "Remote",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "api": "plugin_api.py",
   "tab": {
     "path": "/ssh-deploy",

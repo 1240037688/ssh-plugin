@@ -3,109 +3,168 @@
 [![CI](https://github.com/1240037688/ssh-plugin/actions/workflows/ci.yml/badge.svg)](https://github.com/1240037688/ssh-plugin/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Hermes **unified package** plugin: visual SSH/SFTP file manager (PyCharm-style mappings) + keep-alive sessions + Agent tools.
+Visual SSH/SFTP file management for [Hermes](https://hermes-agent.nousresearch.com/docs/) — PyCharm Deployment-style mappings, keep-alive sessions, REST API, and Agent tools in one **unified package**.
 
-Repository: https://github.com/1240037688/ssh-plugin
+| | |
+|--|--|
+| **Desktop** | Three-pane remote host UI at `/ssh-deploy` |
+| **REST** | `/api/plugins/ssh-plugin/*` |
+| **Agent** | `ssh_*` tools (list, health, ls, read/write, sync, glob, tail, download tree, exec) |
+| **Security** | DPAPI secrets (Windows), path allowlists, dry-run writes, optional process bridge, optional vault refs |
 
-## Features
+---
 
-| Surface | What you get |
-|---------|----------------|
-| **Desktop** | Route `/ssh-deploy`（侧栏 SSH 部署）：服务器列表、远程树、编辑器、图片预览、连接测试、Mappings/Exclusions、**写前 Diff 确认**、批量同步预览与审计记录 |
-| **Backend** | FastAPI router at `/api/plugins/ssh-plugin/` |
-| **Agent tools** | `ssh_list_servers` `ssh_health` `ssh_ls` `ssh_read_file` `ssh_write_file` `ssh_map_path` `ssh_mkdir` `ssh_delete` `ssh_upload` `ssh_download` `ssh_download_tree` `ssh_glob` `ssh_tail` `ssh_sync` `ssh_exec` |
-| **Security** | Secret masking, host mask for agents, path allowlists, command whitelist, dry-run writes |
+## Quick start
 
-## Layout
+1. Install **paramiko** in the Hermes gateway environment (Hermes does not auto-pip-install plugin deps):
+
+   ```bash
+   python -m pip install "paramiko>=3.0.0"
+   ```
+
+2. Clone this repo into the **active profile** plugin root (paths vary by machine/profile):
+
+   ```bash
+   # Example: code profile on Windows
+   git clone https://github.com/1240037688/ssh-plugin "D:/hermes/profiles/code/plugins/ssh-plugin"
+
+   # Example: default layout on Linux/macOS
+   git clone https://github.com/1240037688/ssh-plugin "$HOME/.hermes/plugins/ssh-plugin"
+   ```
+
+3. Enable the Python half in the profile `config.yaml`:
+
+   ```yaml
+   plugins:
+     enabled:
+       - ssh-plugin
+   ```
+
+4. Restart Hermes Desktop / gateway.
+
+5. Open **Capabilities → Plugins** and turn **ssh-plugin** on (unified desktop half is opt-in).
+
+6. Use **SSH 部署** / command palette to add servers. Credential file lives under the profile plugin-data directory — **never commit** it.
+
+> After changing plugin files, pull/copy into the profile plugin folder and restart Hermes.
+
+---
+
+## Desktop UI
+
+- Server switcher (dropdown), add / edit / **delete** (with confirm), test connection, set default
+- Lazy remote file tree, text editor, image preview
+- Write path: dry-run + unified-diff confirm before overwrite
+- **Operations** panel: mapping-based batch sync preview/confirm + audit tail
+- Server form accepts optional **`hv://service[?alias=]`** password refs (see Security)
+
+Offline browser mock (no Hermes): open `preview/index.html`.
+
+---
+
+## Agent tools
+
+| Tool | Notes |
+|------|--------|
+| `ssh_list_servers` | Host/username masked by default |
+| `ssh_health` | Connectivity / latency probe |
+| `ssh_ls` / `ssh_read_file` | Directory listing; chunked file read (`offset`/`limit`) |
+| `ssh_write_file` | Prefer `dryRun: true` for unified diff first |
+| `ssh_map_path` | Local ↔ remote mapping |
+| `ssh_mkdir` / `ssh_delete` | Bounded remote mutations |
+| `ssh_upload` / `ssh_download` | Local path allowlist applies |
+| `ssh_download_tree` | Bounded tree download; dry-run default |
+| `ssh_glob` / `ssh_tail` | Result discovery / log tail |
+| `ssh_sync` | Mapping batch upload; dry-run default |
+| `ssh_exec` | Only if server `allow_exec`; prefer `commandWhitelist` |
+
+External performance-loop prompts: `skills/perf-loop/SKILL.md` (this plugin stays SSH + files only).
+
+---
+
+## Optional integrations
+
+### Subprocess bridge (process isolation)
+
+```bash
+# Run REST SSH/SFTP in a persistent child worker (keepalive across requests)
+SSH_PLUGIN_BRIDGE=1
+
+# Or one process per call
+SSH_PLUGIN_BRIDGE=1
+SSH_PLUGIN_BRIDGE_ONESHOT=1
+```
+
+Default: **off** (in-process thread pool). See [SECURITY.md](SECURITY.md).
+
+### hermes-vault secret refs
+
+Password / passphrase / private key fields may be:
+
+```text
+hv://service
+hv://service?alias=name
+```
+
+- **If `hermes_vault` is installed** — resolved at connect time (memory only; not written back to disk).
+- **If not installed** — the vault path is **skipped** (ref treated as unset); the plugin continues with stored literals.
+
+---
+
+## Security (summary)
+
+Full policy: [SECURITY.md](SECURITY.md).
+
+- Secrets at rest: Windows **DPAPI** (`enc:dpapi:v1:…`); non-Windows uses explicit `plain:` (do not commit `deployments.json`)
+- Agent host mask; REST masks secrets
+- `allowedRemotePaths` / `allowedLocalPaths`; command whitelist/blacklist
+- Writes: dry-run + confirm
+- Host-key policy: `known_hosts` + RejectPolicy when available
+- `allow_exec` default **false**
+
+---
+
+## Package layout
 
 ```text
 ssh-plugin/
-├── plugin.yaml                 # agent manifest + python_dependencies
-├── __init__.py                 # register tools + skills
+├── plugin.yaml                 # agent manifest
+├── __init__.py                 # register tools
 ├── schemas.py / tools.py
-├── deployment_store.py         # servers / mappings (local data dir)
-├── deploy_paths.py             # host mask + mapping + unified diff
+├── deployment_store.py         # servers / mappings
+├── deploy_paths.py             # mask, map, diff
 ├── security.py / ssh_session.py / sftp_client.py
-├── dashboard/
-│   ├── manifest.json
-│   └── plugin_api.py           # REST for Desktop
-├── desktop/plugin.js           # Hermes Desktop UI (no JSX build step)
-├── skills/perf-loop/SKILL.md
-├── preview/                    # offline UI mock (browser)
+├── download_plan.py / sync_plan.py
+├── vault_secrets.py            # optional hv:// refs
+├── ssh_bridge.py               # optional subprocess bridge
+├── ssh_bridge_worker.py
+├── dashboard/                  # REST adapter + manifest
+├── desktop/plugin.js           # Desktop UI (no JSX build)
+├── skills/
+├── preview/                    # offline UI mock
 ├── tests/                      # offline unit tests
-└── docs/compose/spec/          # design notes
+└── docs/compose/spec/          # feature notes
 ```
 
-## Install
-
-1. **Dependencies** (Hermes does **not** auto-install):
-
-```bash
-python -m pip install "paramiko>=3.0.0"
-```
-
-2. **Install package** into the active Hermes profile's plugin root. Use the profile selected by Hermes; the `code` profile on this machine uses `D:\hermes\profiles\code\plugins\ssh-plugin`.
-
-```bash
-# Linux / macOS (replace the profile path as needed)
-git clone https://github.com/1240037688/ssh-plugin "$HOME/.hermes/plugins/ssh-plugin"
-
-# Windows (PowerShell) — replace with the active profile path
-git clone https://github.com/1240037688/ssh-plugin "D:\hermes\profiles\code\plugins\ssh-plugin"
-```
-
-3. **Enable Python half** in `$HERMES_HOME/config.yaml`:
-
-```yaml
-plugins:
-  enabled:
-    - ssh-plugin
-```
-
-4. **Restart** Hermes gateway / Desktop. Enable **Capabilities → Plugins → ssh-plugin** (unified packages ship opt-in).
-
-5. Configure servers in **SSH 部署** UI. Secrets stay under `$HERMES_HOME/plugin-data/ssh-plugin/` — **never commit** that file.
-
-## Agent tools (summary)
-
-- `ssh_list_servers` — host/username **masked** by default (`unmask: true` to reveal, still no passwords)
-- `ssh_write_file` — set `dryRun: true` to get a unified diff first
-- `ssh_map_path` — PyCharm-style local ↔ remote mapping
-- `ssh_upload` — optional `remotePath` (auto-mapped from local when omitted)
-- `ssh_download_tree` — bounded directory download to an allowed local path; dry-run by default
-- `ssh_glob` / `ssh_tail` — bounded remote result search and log tail
-- `ssh_sync` — batch upload via mappings; dry-run by default
-- `ssh_exec` — only if `allow_exec`; prefer `commandWhitelist`
-
-See `skills/perf-loop/SKILL.md` for a staged prompt plan (P0–P6) used with external performance plugins.
-
-## Security
-
-Read [SECURITY.md](SECURITY.md). Highlights:
-
-- Credentials at rest are protected with **Windows DPAPI** (CurrentUser) in `deployments.json` (`enc:dpapi:v1:…`); same OS account can still decrypt — protect your login
-- Prefer key auth; set `allowedRemotePaths` and leave `allow_exec` off unless required
-- Desktop/API writes support dry-run + confirm
-- Optional process isolation: set `SSH_PLUGIN_BRIDGE=1` so REST SSH/SFTP runs in a short-lived worker process (default off, in-process)
-- Optional vault refs: password fields may be `hv://service[?alias=]` — resolved **only if** `hermes_vault` is installed; otherwise the ref is ignored (field unset) and the plugin continues without vault
+---
 
 ## Development
 
 ```bash
+# Desktop syntax (Hermes loads as ESM — also check as .mjs)
 node --check desktop/plugin.js
+cp desktop/plugin.js /tmp/plugin.mjs && node --check /tmp/plugin.mjs
+
+# Unit tests (needs fastapi/pydantic/paramiko in the env)
 python -m unittest discover -s tests -v
 ```
 
-Contributions: [CONTRIBUTING.md](CONTRIBUTING.md).
+Contributing: [CONTRIBUTING.md](CONTRIBUTING.md) · Changelog: [CHANGELOG.md](CHANGELOG.md) · Specs: `docs/compose/spec/`.
 
-## Browser preview (no Hermes)
-
-Open `preview/index.html` for an offline mock of the three-pane UI (mock filesystem only).
-
-## Acknowledgments
-
-See [ACKNOWLEDGMENTS.md](ACKNOWLEDGMENTS.md).
+---
 
 ## License
 
 [MIT](LICENSE)
+
+Acknowledgments: [ACKNOWLEDGMENTS.md](ACKNOWLEDGMENTS.md).
