@@ -163,6 +163,11 @@ def _alive(transport) -> bool:
 
 def get_session(server: dict[str, Any], *, force_new: bool = False):
     """Yield (sftp, client) under the per-server lock. Caller must stay in `with`."""
+    try:
+        from .vault_secrets import resolve_server_secrets
+    except ImportError:
+        from vault_secrets import resolve_server_secrets  # type: ignore
+    server = resolve_server_secrets(server)
     entry = _entry_for(server)
 
     class _Ctx:

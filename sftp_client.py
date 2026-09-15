@@ -165,7 +165,11 @@ def session_server(server: dict[str, Any]) -> dict[str, Any]:
             s[k] = None
     if s.get("privateKey") == "***":
         s["privateKey"] = None
-    return s
+    try:
+        from .vault_secrets import resolve_server_secrets
+    except ImportError:
+        from vault_secrets import resolve_server_secrets  # type: ignore
+    return resolve_server_secrets(s)
 
 
 def _meta(st_mode: int, size: int, mtime: float, name: str) -> dict[str, Any]:
