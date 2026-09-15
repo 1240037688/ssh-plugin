@@ -38,6 +38,117 @@ async def _ssh_call(fn: Callable[..., _T], /, *args: Any, **kwargs: Any) -> _T:
         return await loop.run_in_executor(_SSH_EXECUTOR, lambda: fn(*args, **kwargs))
     return await loop.run_in_executor(_SSH_EXECUTOR, fn, *args)
 
+
+async def _remote(op: str, payload: dict[str, Any]) -> Any:
+    """Run an SSH op in-process, or via subprocess bridge when enabled."""
+    try:
+        from ssh_bridge import bridge_enabled, call as bridge_call
+    except ImportError:
+        from ..ssh_bridge import bridge_enabled, call as bridge_call  # type: ignore
+    if bridge_enabled():
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(_SSH_EXECUTOR, bridge_call, op, payload)
+    handler = _INPROCESS_OPS[op]
+    return await _ssh_call(handler, payload)
+
+
+def _in_list_dir(p: dict[str, Any]) -> Any:
+    return sftp_client.list_dir(p["server"], p["path"])
+
+
+def _in_read_text(p: dict[str, Any]) -> Any:
+    if p.get("offset") is not None or p.get("limit") is not None:
+        return sftp_client.read_text_chunk(
+            p["server"],
+            p["path"],
+            offset=int(p.get("offset") or 0),
+            limit=int(p.get("limit") or sftp_client.CHUNK_DEFAULT),
+        )
+    return sftp_client.read_text(p["server"], p["path"])
+
+
+def _in_write_text(p: dict[str, Any]) -> Any:
+    return sftp_client.write_text(p["server"], p["path"], p.get("content") or "")
+
+
+def _in_mkdir(p: dict[str, Any]) -> Any:
+    return sftp_client.mkdir(p["server"], p["path"])
+
+
+def _in_delete(p: dict[str, Any]) -> Any:
+    return sftp_client.delete(p["server"], p["path"], recursive=bool(p.get("recursive")))
+
+
+def _in_rename(p: dict[str, Any]) -> Any:
+    return sftp_client.rename(p["server"], p["src"], p["dst"])
+
+
+def _in_upload(p: dict[str, Any]) -> Any:
+    return sftp_client.upload_bytes(p["server"], p["path"], p["data"])
+
+
+def _in_download(p: dict[str, Any]) -> Any:
+    return sftp_client.download_bytes(p["server"], p["path"])
+
+
+def _in_preview(p: dict[str, Any]) -> Any:
+    return sftp_client.preview_image(p["server"], p["path"])
+
+
+def _in_test(p: dict[str, Any]) -> Any:
+    return sftp_client.test_connection(p["server"])
+
+
+def _in_health(p: dict[str, Any]) -> Any:
+    return sftp_client.health_check(p["server"])
+
+
+def _in_download_tree(p: dict[str, Any]) -> Any:
+    from download_plan import download_tree
+
+    return download_tree(
+        p["server"],
+        p["remoteRoot"],
+        p["localRoot"],
+        dry_run=bool(p.get("dryRun", True)),
+        max_files=int(p.get("maxFiles") or 500),
+        max_entries=int(p.get("maxEntries") or 10000),
+    )
+
+
+def _in_sync_plan(p: dict[str, Any]) -> Any:
+    from sync_plan import plan_sync
+
+    return plan_sync(
+        p["server"],
+        p["localRoot"],
+        dry_run=bool(p.get("dryRun", True)),
+        max_files=int(p.get("maxFiles") or 500),
+        expected_files=p.get("expectedFiles"),
+    )
+
+
+def _in_exec(p: dict[str, Any]) -> Any:
+    return sftp_client.exec_command(p["server"], p["command"], timeout=int(p.get("timeout") or 30))
+
+
+_INPROCESS_OPS: dict[str, Callable[[dict[str, Any]], Any]] = {
+    "list_dir": _in_list_dir,
+    "read_text": _in_read_text,
+    "write_text": _in_write_text,
+    "mkdir": _in_mkdir,
+    "delete": _in_delete,
+    "rename": _in_rename,
+    "upload": _in_upload,
+    "download": _in_download,
+    "preview": _in_preview,
+    "test": _in_test,
+    "health": _in_health,
+    "download_tree": _in_download_tree,
+    "sync_plan": _in_sync_plan,
+    "exec": _in_exec,
+}
+
 _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
@@ -218,7 +329,7 @@ async def health() -> dict[str, Any]:
 @router.get("/health/server")
 async def health_server(id: str) -> dict[str, Any]:
     server = _server_or_404(id)
-    return await _ssh_call(sftp_client.health_check, server)
+    return await _remote("health", {"server": server})
 
 
 @router.get("/conn/stats")
@@ -252,10 +363,10 @@ class DownloadTreeIn(BaseModel):
 async def fs_download_tree(body: DownloadTreeIn) -> dict[str, Any]:
     server = _server_or_404(body.id)
     try:
-        from download_plan import download_tree
-        result = await _ssh_call(
-            download_tree, server, body.remoteRoot, body.localRoot,
-            dry_run=body.dryRun, max_files=body.maxFiles, max_entries=body.maxEntries,
+        result = await _remote(
+            "download_tree",
+            {"server": server, "remoteRoot": body.remoteRoot, "localRoot": body.localRoot,
+             "dryRun": body.dryRun, "maxFiles": body.maxFiles, "maxEntries": body.maxEntries},
         )
         _audit("download_tree", server, result["remoteRoot"], dryRun=body.dryRun, count=result["count"])
         return result
@@ -274,9 +385,10 @@ async def fs_sync(body: SyncIn) -> dict[str, Any]:
     if not local_root:
         raise HTTPException(status_code=400, detail="localRoot required (or configure mappings)")
     try:
-        result = await _ssh_call(
-            plan_sync, server, local_root, dry_run=body.dryRun, max_files=body.maxFiles,
-            expected_files=body.expectedFiles,
+        result = await _remote(
+            "sync_plan",
+            {"server": server, "localRoot": local_root, "dryRun": body.dryRun,
+             "maxFiles": body.maxFiles, "expectedFiles": body.expectedFiles},
         )
         if result.get("ok"):
             _audit(
@@ -333,7 +445,7 @@ async def set_default(body: dict[str, Any]) -> dict[str, Any]:
 @router.post("/servers/{server_id}/test")
 async def test_server(server_id: str) -> dict[str, Any]:
     server = _server_or_404(server_id)
-    return await _ssh_call(sftp_client.test_connection, server)
+    return await _remote("test", {"server": server})
 
 
 @router.get("/fs/ls")
@@ -341,7 +453,7 @@ async def fs_ls(id: str, path: str = "/") -> dict[str, Any]:
     server = _server_or_404(id)
     p = _safe_path(server, path)
     try:
-        result = await _ssh_call(sftp_client.list_dir, server, p)
+        result = await _remote("list_dir", {"server": server, "path": p})
     except sftp_client.SftpError as exc:
         raise _err(exc, 502) from exc
     except Exception as exc:
@@ -361,14 +473,11 @@ async def fs_read(
     p = _safe_path(server, path)
     try:
         if offset is not None or limit is not None:
-            return await _ssh_call(
-                sftp_client.read_text_chunk,
-                server,
-                p,
-                offset=offset or 0,
-                limit=limit or sftp_client.CHUNK_DEFAULT,
+            return await _remote(
+                "read_text",
+                {"server": server, "path": p, "offset": offset or 0, "limit": limit or sftp_client.CHUNK_DEFAULT},
             )
-        return await _ssh_call(sftp_client.read_text, server, p)
+        return await _remote("read_text", {"server": server, "path": p})
     except Exception as exc:
         raise _err(exc, 502) from exc
 
@@ -378,7 +487,7 @@ async def fs_preview(id: str, path: str) -> dict[str, Any]:
     server = _server_or_404(id)
     p = _safe_path(server, path)
     try:
-        return await _ssh_call(sftp_client.preview_image, server, p)
+        return await _remote("preview", {"server": server, "path": p})
     except Exception as exc:
         raise _err(exc, 502) from exc
 
@@ -388,10 +497,17 @@ async def fs_download(id: str, path: str) -> dict[str, Any]:
     server = _server_or_404(id)
     p = _safe_path(server, path)
     try:
-        data = await _ssh_call(sftp_client.download_bytes, server, p)
+        data = await _remote("download", {"server": server, "path": p})
     except Exception as exc:
         raise _err(exc, 502) from exc
     name = p.rstrip("/").rsplit("/", 1)[-1]
+    if isinstance(data, dict) and "contentBase64" in data:
+        return {
+            "path": p,
+            "filename": name,
+            "bytes": data.get("bytes"),
+            "contentBase64": data["contentBase64"],
+        }
     return {
         "path": p,
         "filename": name,
@@ -407,14 +523,14 @@ async def fs_write(body: WriteIn) -> dict[str, Any]:
     try:
         old = ""
         try:
-            old = (await _ssh_call(sftp_client.read_text, server, p))["content"]
+            old = (await _remote("read_text", {"server": server, "path": p}))["content"]
         except OSError as exc:
             if exc.errno != errno.ENOENT:
                 raise
         meta = unified_diff(old, body.content, p)
         if body.dryRun:
             return {"ok": True, "dryRun": True, "written": False, **meta}
-        result = await _ssh_call(sftp_client.write_text, server, p, body.content)
+        result = await _remote("write_text", {"server": server, "path": p, "content": body.content})
         _audit("write", server, p, addedLines=meta["addedLines"], removedLines=meta["removedLines"])
         return {
             "ok": True,
@@ -446,7 +562,7 @@ async def fs_mkdir(body: MkdirIn) -> dict[str, Any]:
     server = _server_or_404(body.id)
     p = _safe_path(server, body.path)
     try:
-        result = await _ssh_call(sftp_client.mkdir, server, p)
+        result = await _remote("mkdir", {"server": server, "path": p})
         _audit("mkdir", server, p)
         return result
     except Exception as exc:
@@ -463,7 +579,7 @@ async def fs_rename(body: RenameIn) -> dict[str, Any]:
     src = _safe_path(server, raw_src)
     dst = _safe_path(server, raw_dst)
     try:
-        result = await _ssh_call(sftp_client.rename, server, src, dst)
+        result = await _remote("rename", {"server": server, "src": src, "dst": dst})
         _audit("rename", server, src, dst=dst)
         return result
     except Exception as exc:
@@ -478,7 +594,7 @@ async def fs_delete(body: DeleteIn) -> dict[str, Any]:
     if p == "/":
         raise HTTPException(status_code=400, detail="refusing to delete root")
     try:
-        result = await _ssh_call(sftp_client.delete, server, p, recursive=body.recursive)
+        result = await _remote("delete", {"server": server, "path": p, "recursive": body.recursive})
         _audit("delete", server, p, recursive=body.recursive)
         return result
     except Exception as exc:
@@ -498,7 +614,18 @@ async def fs_upload(body: UploadIn) -> dict[str, Any]:
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"invalid base64: {exc}") from exc
     try:
-        result = await _ssh_call(sftp_client.upload_bytes, server, p, raw)
+        try:
+            from ssh_bridge import bridge_enabled
+        except ImportError:
+            from ..ssh_bridge import bridge_enabled  # type: ignore
+        if bridge_enabled():
+            import base64 as _b64
+            result = await _remote(
+                "upload",
+                {"server": server, "path": p, "contentBase64": _b64.b64encode(raw).decode("ascii")},
+            )
+        else:
+            result = await _remote("upload", {"server": server, "path": p, "data": raw})
         _audit("upload", server, p, bytes=result.get("bytes"))
         return result
     except Exception as exc:
@@ -528,8 +655,8 @@ async def put_mappings(body: MappingsIn) -> dict[str, Any]:
 async def exec_cmd(body: ExecIn) -> dict[str, Any]:
     server = _server_or_404(body.id)
     try:
-        result = await _ssh_call(
-            sftp_client.exec_command, server, body.command, timeout=body.timeout
+        result = await _remote(
+            "exec", {"server": server, "command": body.command, "timeout": body.timeout}
         )
         _audit("exec", server, None, command=body.command[:200], exitCode=result.get("exitCode"))
         return result
