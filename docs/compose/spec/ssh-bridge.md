@@ -10,7 +10,7 @@ commits: 3e33199..ab9b3fa
 
 ## Report
 
-**What was built** — 可选子进程隔离：`SSH_PLUGIN_BRIDGE=1` 时，REST 的 SSH/SFTP 操作经 `ssh_bridge.call` 启动短生命周期 `ssh_bridge_worker.py`（stdin/stdout JSON 行协议）执行，崩溃与超时留在子进程。默认仍走 `_remote` + 线程池（与 0.2.x 行为一致）。download/upload 在 bridge 下使用 JSON 安全信封，REST 兼容两种返回。
+**What was built** — 可选子进程隔离：`SSH_PLUGIN_BRIDGE=1` 时，REST SSH/SFTP 经长驻 `ssh_bridge_worker.py` 执行（可跨请求复用 SSH 池/keepalive）；`SSH_PLUGIN_BRIDGE_ONESHOT=1` 可退回每请求新进程。默认仍走 `_remote` + 线程池。download/upload 使用 JSON 安全信封。
 
 **Verification** — `unittest discover` 42 PASS；`py_compile` bridge/api PASS；默认 `SSH_PLUGIN_BRIDGE` 未设时 `bridge_enabled()` 为 False；`call("no_such_op")` 返回结构化 `unknown op` 错误。
 
@@ -27,9 +27,10 @@ REST 已用线程池避免阻塞事件循环，但 paramiko 仍在 gateway 进�
 
 - `ssh_bridge.py` + `ssh_bridge_worker.py`（stdin/stdout JSON 行）。
 - 开关：`SSH_PLUGIN_BRIDGE` ∈ {1,true,yes,on}；**默认关闭**。
-- `plugin_api._remote(op, payload)`：关→进程内线程池；开→短生命周期 worker。
+- `plugin_api._remote(op, payload)`：关→进程内线程池；开→bridge worker。
 - ops：list_dir/read_text/write_text/mkdir/delete/rename/upload/download/preview/test/health/download_tree/sync_plan/exec。
 - download 在 bridge 下返回 base64 信封，REST 兼容。
+- Worker lifetime：默认 **长驻复用**（跨请求保留子进程 SSH 池/keepalive）；`SSH_PLUGIN_BRIDGE_ONESHOT=1` 每请求新进程；崩溃/超时后下次自动重启。
 
 ## [S3] Out of Scope
 

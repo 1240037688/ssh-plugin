@@ -53,11 +53,41 @@ class TestWorkerProtocol(unittest.TestCase):
         self.assertEqual(result["result"]["entries"][0]["name"], "a.txt")
 
     def test_call_spawns_worker_error_envelope(self):
+        ssh_bridge.stop_worker()
         try:
             ssh_bridge.call("no_such_op", {}, timeout=20)
             self.fail("expected BridgeError")
         except ssh_bridge.BridgeError as exc:
             self.assertIn("unknown op", str(exc))
+        finally:
+            ssh_bridge.stop_worker()
+
+    def test_persistent_worker_reused(self):
+        ssh_bridge.stop_worker()
+        try:
+            try:
+                ssh_bridge.call("no_such_op", {}, timeout=20)
+            except ssh_bridge.BridgeError:
+                pass
+            proc1 = ssh_bridge._PROC
+            self.assertIsNotNone(proc1)
+            self.assertIsNone(proc1.poll())
+            try:
+                ssh_bridge.call("also_bad", {}, timeout=20)
+            except ssh_bridge.BridgeError:
+                pass
+            self.assertIs(ssh_bridge._PROC, proc1)
+        finally:
+            ssh_bridge.stop_worker()
+
+    def test_oneshot_does_not_keep_worker(self):
+        ssh_bridge.stop_worker()
+        with patch.dict(os.environ, {"SSH_PLUGIN_BRIDGE_ONESHOT": "1"}):
+            try:
+                ssh_bridge.call("no_such_op", {}, timeout=20)
+            except ssh_bridge.BridgeError:
+                pass
+        self.assertIsNone(ssh_bridge._PROC)
 
 
 class TestPluginApiRemoteDispatch(unittest.IsolatedAsyncioTestCase):
