@@ -5,6 +5,8 @@
 
 Visual SSH/SFTP file management for [Hermes](https://hermes-agent.nousresearch.com/docs/) — PyCharm Deployment-style mappings, keep-alive sessions, REST API, and Agent tools in one **unified package**.
 
+**Current release: `0.2.1`** · [Changelog](CHANGELOG.md)
+
 | | |
 |--|--|
 | **Desktop** | Three-pane remote host UI at `/ssh-deploy` |
@@ -145,6 +147,16 @@ ssh-plugin/
 ├── tests/                      # offline unit tests
 └── docs/compose/spec/          # feature notes
 ```
+
+---
+
+## What's new in 0.2.x
+
+- Multi-server switch without freezing the UI; delete server with confirm
+- Batch sync + audit in the Desktop **Operations** panel
+- `ssh_download_tree` / `ssh_glob` / `ssh_tail` for pulling remote results
+- Optional `SSH_PLUGIN_BRIDGE=1` process isolation (persistent worker + keepalive)
+- Optional `hv://…` vault password refs when `hermes_vault` is installed
 
 ---
 

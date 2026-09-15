@@ -19,6 +19,9 @@ provides_tools:
   - ssh_delete
   - ssh_upload
   - ssh_download
+  - ssh_download_tree
+  - ssh_glob
+  - ssh_tail
   - ssh_sync
   - ssh_exec
 config_schema:
