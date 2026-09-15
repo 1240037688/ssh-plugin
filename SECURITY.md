@@ -25,6 +25,7 @@ Desktop plugins and Python gateway plugins in Hermes run with **full trust** in 
 | Host keys | `known_hosts` + RejectPolicy when the file exists |
 | Secrets at rest | **Windows DPAPI (CurrentUser)** — `enc:dpapi:v1:…` in `deployments.json` |
 | Subprocess bridge | Optional: `SSH_PLUGIN_BRIDGE=1` runs REST SSH/SFTP in `ssh_bridge_worker.py` (short-lived child). Default **off** (in-process thread pool). |
+| Vault secret refs | Optional: `hv://service[?alias=]` in password fields. Resolved **only when `hermes_vault` is installed**; if not installed the vault path is skipped (field unset) — connect does not fail due to a missing package. |
 
 ## Known limitations
 

@@ -5,12 +5,14 @@ A server may store password / passphrase / privateKeyContent as a vault ref:
     hv://service
     hv://service?alias=name
 
-When the ref is seen at connect time, ``hermes_vault.Vault.resolve_credential``
-is used if the package is importable. Resolved secrets stay in memory only and
-are never written back to ``deployments.json`` or audit logs.
+**Optional integration** — if ``hermes_vault`` is installed, refs are resolved
+at connect time (secrets stay in memory only; never written back to
+``deployments.json``; audit records the ref, not the secret).
 
-If ``hermes_vault`` is not installed, resolution raises a clear error so the
-operator can fall back to DPAPI-stored literals.
+If ``hermes_vault`` is **not** installed, this path is skipped entirely:
+``hv://`` fields are treated as unset (cleared to ``None``) so the plugin
+continues with DPAPI literals / key auth and does **not** fail the connect
+with a missing-package error.
 """
 
 from __future__ import annotations
@@ -25,11 +27,20 @@ except ImportError:
 
 
 class VaultRefError(RuntimeError):
-    pass
+    """Raised only when vault is available but a ref cannot be resolved."""
 
 
 def is_vault_ref(value: Any) -> bool:
     return isinstance(value, str) and value.strip().lower().startswith("hv://")
+
+
+def vault_available() -> bool:
+    """True when hermes_vault can be imported in this environment."""
+    try:
+        from hermes_vault.vault import Vault  # noqa: F401
+    except ImportError:
+        return False
+    return True
 
 
 def parse_ref(raw: str) -> tuple[str, str | None]:
@@ -51,19 +62,18 @@ def parse_ref(raw: str) -> tuple[str, str | None]:
 
 
 def resolve_ref(raw: str) -> str:
-    """Resolve one hv:// reference to a secret string (never logged)."""
+    """Resolve one hv:// reference. Caller must ensure vault_available()."""
     service, alias = parse_ref(raw)
     try:
         from hermes_vault.vault import Vault
     except ImportError as exc:
         raise VaultRefError(
-            "hermes_vault is not installed in this gateway environment; "
-            "cannot resolve hv:// secret refs"
+            "hermes_vault is not installed; resolve_ref requires the optional package"
         ) from exc
     try:
         vault = Vault()
         record = vault.resolve_credential(service, alias)
-    except Exception as exc:  # noqa: BLE001 — map vault errors to a single type
+    except Exception as exc:  # noqa: BLE001
         raise VaultRefError(f"vault resolve failed for {service}/{alias or '-'}: {exc}") from exc
     secret = getattr(record, "secret", None) or getattr(record, "value", None)
     if not secret:
@@ -71,13 +81,8 @@ def resolve_ref(raw: str) -> str:
     return str(secret)
 
 
-def _maybe_resolve(field: str, value: Any, server_id: str | None) -> Any:
-    if not is_vault_ref(value):
-        return value
-    try:
-        secret = resolve_ref(value)
-    except VaultRefError:
-        raise
+def _resolve_field(field: str, value: Any, server_id: str | None) -> str:
+    secret = resolve_ref(value)
     audit_record(
         "vault_resolve",
         server_id=server_id,
@@ -90,17 +95,29 @@ def _maybe_resolve(field: str, value: Any, server_id: str | None) -> Any:
 
 
 def resolve_server_secrets(server: dict[str, Any]) -> dict[str, Any]:
-    """Return a copy of *server* with hv:// refs replaced by in-memory secrets."""
+    """Copy *server*, resolving hv:// refs when vault is installed.
+
+    No vault package → skip the vault path: clear refs to None (do not send
+    ``hv://…`` as a password) and leave literal credentials untouched.
+    """
     if not server:
         return server
     out = dict(server)
+    ref_fields = [f for f in ("password", "passphrase", "privateKeyContent", "privateKey") if is_vault_ref(out.get(f))]
+    if not ref_fields:
+        return out
+    if not vault_available():
+        for field in ref_fields:
+            out[field] = None
+        if is_vault_ref(server.get("privateKey")):
+            out["privateKey"] = None
+        return out
     sid = out.get("id") or out.get("name")
     for field in ("password", "passphrase", "privateKeyContent"):
         if is_vault_ref(out.get(field)):
-            out[field] = _maybe_resolve(field, out[field], sid)
-    # privateKey path may also be a ref (inline key content via vault)
+            out[field] = _resolve_field(field, out[field], sid)
     if is_vault_ref(out.get("privateKey")):
-        content = _maybe_resolve("privateKey", out["privateKey"], sid)
+        content = _resolve_field("privateKey", out["privateKey"], sid)
         out["privateKeyContent"] = content
         out["privateKey"] = None
         out["auth"] = "key"

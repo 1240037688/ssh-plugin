@@ -10,14 +10,14 @@ commits: fb2fb5d..e139093
 
 ## Report
 
-**What was built** — 服务器 `password` / `passphrase` / `privateKeyContent` / `privateKey` 支持写成 `hv://service` 或 `hv://service?alias=name`。连接时经 `vault_secrets.resolve_server_secrets` 调用 `hermes_vault.Vault.resolve_credential`；明文只进内存，audit 只记 ref。未安装 vault 包时抛出可读的 `VaultRefError`。`privateKey` 为 ref 时转为 inline key content。
+**What was built** — 服务器 `password` / `passphrase` / `privateKeyContent` / `privateKey` 支持写成 `hv://service` 或 `hv://service?alias=name`。**可选集成**：仅当环境中能 `import hermes_vault` 时在连接时解析；若未安装，**完全跳过 vault 路径**（`hv://` 字段清为 `None`，字面量凭据不受影响），**不会**因缺包导致连接失败。解析成功时 audit 只记 ref。
 
-**Verification** — `unittest discover` 51 PASS（含 parse / resolve / session_server 钩子 / 缺包错误）；`py_compile` 通过。
+**Verification** — `unittest discover` 全绿；无 vault 时 `resolve_server_secrets` 不调用 `resolve_ref`、不抛错。
 
 **Journey log**
-- DPAPI 落盘的 `hv://` 字符串解密后仍是 ref，连接时再解析，无需改 store。
+- 可选依赖必须「有则用、无则跳过」，不能在缺包时抛错阻断 SSH。
+- DPAPI 落盘的 `hv://` 解密后仍是 ref；无 vault 时按未配置口令处理。
 - 不要把解析结果写回 `deployments.json`。
-- Desktop 表单可手填 `hv://…`，无需本轮改 UI。
 
 ## [S1] Problem
 
@@ -26,9 +26,8 @@ HANDOFF 列 vault 为可选：SSH 口令/口令短语可不落 `deployments.json
 ## [S2] Design
 
 - 服务器字段可写 `hv://service` 或 `hv://service?alias=name`。
-- `vault_secrets.resolve_server_secrets` 在连接时解析；明文只进内存。
+- `vault_secrets.resolve_server_secrets`：`vault_available()` 为真才解析；为假则跳过（ref 清空），不抛错。
 - 钩子：`sftp_client.session_server` 与 `ssh_session.get_session`。
-- 未安装 `hermes_vault` 时抛 `VaultRefError`。
 
 ## [S3] Out of Scope
 

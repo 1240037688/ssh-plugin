@@ -87,6 +87,7 @@ Read [SECURITY.md](SECURITY.md). Highlights:
 - Prefer key auth; set `allowedRemotePaths` and leave `allow_exec` off unless required
 - Desktop/API writes support dry-run + confirm
 - Optional process isolation: set `SSH_PLUGIN_BRIDGE=1` so REST SSH/SFTP runs in a short-lived worker process (default off, in-process)
+- Optional vault refs: password fields may be `hv://service[?alias=]` — resolved **only if** `hermes_vault` is installed; otherwise the ref is ignored (field unset) and the plugin continues without vault
 
 ## Development
 
