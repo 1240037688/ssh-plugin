@@ -4,14 +4,16 @@ SSH_LIST_SERVERS = {
     "name": "ssh_list_servers",
     "description": (
         "List configured SSH deployment servers. "
-        "By default host/username are masked (***); set unmask=true only when the operator explicitly needs the real endpoint."
+        "Default (unmask=false) returns only name/configured/allow_exec — no host, port, "
+        "username, password, or derived endpoint strings. "
+        "Set unmask=true only when the operator explicitly needs the real host/user (never passwords)."
     ),
     "parameters": {
         "type": "object",
         "properties": {
             "unmask": {
                 "type": "boolean",
-                "description": "If true, return real host/username (still no passwords). Default false.",
+                "description": "If true, return real host/username/port (still no passwords or derived host:port strings). Default false.",
             }
         },
         "required": [],

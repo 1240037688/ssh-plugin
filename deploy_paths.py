@@ -12,22 +12,51 @@ def mask_host(host: str) -> str:
     """Keep a stable opaque token; never echo the raw address to the agent."""
     if not host:
         return ""
-    # Already masked
     if host.startswith("***"):
         return host
     return "***"
 
 
+# Secret material — never returned to the agent, not even as "***".
+_SECRET_KEYS = ("password", "passphrase", "privateKey", "privateKeyContent")
+# Derived strings that can leak host/user when unmask=false.
+_LEAKY_KEYS = (
+    "endpoint",
+    "connectionString",
+    "userHost",
+    "hostPort",
+    "host_port",
+    "user@host",
+)
+
+
 def agent_public_server(server: dict[str, Any]) -> dict[str, Any]:
-    """Safe shape for LLM / ssh_list_servers (no secrets, no real host/user)."""
+    """Minimal safe shape for LLM / ssh_list_servers (default, unmask=false).
+
+    Returns only name / configured / allow_exec. No host, port, username,
+    password (or "***"), and no derived endpoint / connectionString / userHost.
+    """
+    name = str(server.get("name") or server.get("id") or "")
+    return {
+        "name": name,
+        "configured": True,
+        "allow_exec": bool(server.get("allow_exec")),
+    }
+
+
+def agent_unmask_server(server: dict[str, Any]) -> dict[str, Any]:
+    """Operator-explicit unmask=true: real host/user, still no secrets.
+
+    Also drops derived leak keys so unmask does not add connectionString etc.
+    """
     out = deepcopy(server)
-    for key in ("password", "passphrase", "privateKey", "privateKeyContent"):
-        if out.get(key):
-            out[key] = "***"
-    out["host"] = mask_host(str(out.get("host") or ""))
-    if out.get("username"):
-        out["username"] = "***"
-    out["endpoint"] = f"{out.get('name') or out.get('id')}:{out.get('port') or 22}"
+    for key in _SECRET_KEYS:
+        out.pop(key, None)
+    for key in _LEAKY_KEYS:
+        out.pop(key, None)
+    out["host"] = str(out.get("host") or "")
+    out["username"] = str(out.get("username") or "")
+    out["port"] = out.get("port") or 22
     return out
 
 

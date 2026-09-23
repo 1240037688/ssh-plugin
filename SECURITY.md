@@ -15,7 +15,7 @@ Desktop plugins and Python gateway plugins in Hermes run with **full trust** in 
 | Control | Default |
 |---------|---------|
 | Secrets in REST / `ssh_list_servers` | Masked (`***`) |
-| Agent-facing host/username | Masked (`***`) unless `unmask: true` |
+| Agent-facing host/username | Default `ssh_list_servers` returns only `name` / `configured` / `allow_exec`. `unmask: true` may show real host/user/port — never passwords, never derived `endpoint` / `connectionString` / `userHost` / `host:port` when masked |
 | `allowedRemotePaths` | Optional prefix allowlist; empty = unrestricted (warns via `securityWarnings`) |
 | `allowedLocalPaths` | Limits local upload/download (plus process cwd) |
 | `commandWhitelist` / `commandBlacklist` | Optional; whitelist enables full-match + shell-metachar rejection |

@@ -9,7 +9,7 @@ from typing import Any
 try:
     from . import deployment_store, sftp_client
     from .audit_log import record as audit_record
-    from .deploy_paths import agent_list_servers, map_local_to_remote, map_remote_to_local, unified_diff
+    from .deploy_paths import agent_list_servers, agent_unmask_server, map_local_to_remote, map_remote_to_local, unified_diff
     from .security import validate_local_path
 except ImportError:
     import deployment_store  # type: ignore
@@ -17,6 +17,7 @@ except ImportError:
     from audit_log import record as audit_record  # type: ignore
     from deploy_paths import (  # type: ignore
         agent_list_servers,
+        agent_unmask_server,
         map_local_to_remote,
         map_remote_to_local,
         unified_diff,
@@ -58,7 +59,7 @@ def ssh_list_servers(args: dict, **kwargs) -> str:
         data = deployment_store.load()
         full = data["servers"]
         servers = (
-            [deployment_store.public_server(s) for s in full]
+            [agent_unmask_server(s) for s in full]
             if unmask
             else agent_list_servers(full)
         )
